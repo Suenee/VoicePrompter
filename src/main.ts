@@ -5,7 +5,7 @@ import { state } from './state';
 import { renderScript, updateHighlight, scrollToCurrent, applySettings, renderHistoryList, restartScript } from './render';
 import { initSpeech, startListening, stopListening } from './speech';
 import { autoScrollManager } from './autoscroll';
-import { saveToHistory, getHistory, clearAllHistory } from './storage';
+import { saveToHistory, getHistory, clearAllHistory, loadSetting, saveSetting } from './storage';
 import { ScriptWord, ScrollingMode } from './types';
 import { enterVideoMode, exitVideoMode, toggleVideoLayout, startRecording, stopRecording, flipCamera, getMediaConstraints } from './video';
 import { detectAll } from 'tinyld/light';
@@ -211,6 +211,24 @@ registerSW({ immediate: true });
 
 // --- Initialization ---
 initElements();
+
+/**
+ * Restores the user's previously selected dictation language.
+ * If no saved value exists, the current default value remains unchanged.
+ */
+state.languageSetting = loadSetting(
+    'dictationLanguage',
+    state.languageSetting
+);
+
+/**
+ * Uses the restored manual language immediately for speech recognition.
+ * Automatic mode keeps the default language until a script is analyzed.
+ */
+if (state.languageSetting !== 'auto') {
+    state.selectedLanguage = state.languageSetting;
+}
+
 initSpeech();
 renderLanguageDropdowns();
 
@@ -857,6 +875,12 @@ els.stopSignToggle.addEventListener('change', (e) => {
 function handleLanguageChange(lang: string) {
     (window as any).umami?.track('language-select', { language: lang });
     state.languageSetting = lang;
+
+    /**
+     * Persists the selected language immediately so it can be restored
+     * the next time the application starts.
+     */
+    saveSetting('dictationLanguage', lang);
 
     // if auto, re-detect if there is a script
     if (lang === 'auto') {
