@@ -229,6 +229,25 @@ if (state.languageSetting !== 'auto') {
     state.selectedLanguage = state.languageSetting;
 }
 
+/**
+ * Restores the user's previous Voice Commands preference.
+ * If no saved value exists, the current default value remains unchanged.
+ */
+state.config.voiceCommandsEnabled = loadSetting(
+    'voiceCommandsEnabled',
+    state.config.voiceCommandsEnabled
+);
+
+
+/**
+ * Restores the user's previous Stop Signs preference.
+ * If no saved value exists, the current default value remains unchanged.
+ */
+state.config.showStopIcon = loadSetting(
+    'showStopIcon',
+    state.config.showStopIcon
+);
+
 initSpeech();
 renderLanguageDropdowns();
 
@@ -864,8 +883,17 @@ els.hMirrorToggle.addEventListener('change', (e) => {
 
 // Stop Sign Toggle
 els.stopSignToggle.addEventListener('change', (e) => {
-    state.config.showStopIcon = (e.target as HTMLInputElement).checked;
-    if (state.config.showStopIcon) {
+    const enabled = (e.target as HTMLInputElement).checked;
+
+    state.config.showStopIcon = enabled;
+
+    /**
+     * Persists the Stop Signs preference immediately
+     * so it can be restored when the application starts again.
+     */
+    saveSetting('showStopIcon', enabled);
+
+    if (enabled) {
         els.scriptContent.classList.add('show-stops');
     } else {
         els.scriptContent.classList.remove('show-stops');
@@ -934,7 +962,15 @@ els.preserveFormattingToggle.addEventListener('change', (e) => {
 
 // Voice Command Toggle
 els.voiceCommandToggle.addEventListener('change', (e) => {
-    state.config.voiceCommandsEnabled = (e.target as HTMLInputElement).checked;
+    const enabled = (e.target as HTMLInputElement).checked;
+
+    state.config.voiceCommandsEnabled = enabled;
+
+    /**
+     * Persists the Voice Commands preference immediately
+     * so it can be restored when the application starts again.
+     */
+    saveSetting('voiceCommandsEnabled', enabled);
 });
 
 // Screen Rotation Toggle
@@ -1072,6 +1108,8 @@ function initializeUI(): void {
 
     els.smoothAnimationsToggle.checked = state.config.smoothAnimations;
     els.highlightActiveWordToggle.checked = state.config.highlightActiveWord;
+    els.voiceCommandToggle.checked = state.config.voiceCommandsEnabled;         // Synchronizes the Voice Commands toggle with the restored application state.
+    els.stopSignToggle.checked = state.config.showStopIcon;                     // Synchronizes the Stop Signs toggle with the restored application state.
 
     // Seed demo script for first-time users
     const history = getHistory();
