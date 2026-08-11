@@ -7,9 +7,15 @@ interface ParsedMarker {
     args: MarkerArg[];
 }
 
+interface MarkerHookArgs {
+    marker?: string;
+    text?: string;
+}
+
 export class RemoteEventHooks {
-    public HookMarker(args: { marker: string }): void {
-        const marker = String(args?.marker ?? '').trim();
+    public HookMarker(args: MarkerHookArgs): void {
+        // `text` is kept only as the internal VP hook input alias. It is never emitted in VPP.
+        const marker = String(args?.marker ?? args?.text ?? '').trim();
         if (!marker) return;
 
         const parsed = this.parseMarker(marker);
