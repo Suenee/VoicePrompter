@@ -42,6 +42,21 @@ html {
     @apply italic opacity-50;
 }
 
+/* [SLIDE n] directives act as subtle full-width visual separators. */
+.slide-marker-row {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--slide-marker-bg, rgba(255, 255, 255, 0.06));
+    padding: 0.16em 0.35em;
+    margin: 0.2em 0 0.35em;
+    border-radius: 0.08em;
+}
+
+.slide-marker-row .script-word {
+    margin-bottom: 0;
+}
+
 /* Stop Markers (Hidden by default, shown via class) */
 .stop-marker {
     @apply hidden text-red-500 not-italic opacity-90;
@@ -82,7 +97,7 @@ input[type=range]::-webkit-slider-thumb {
     /* blue-500 -> golden */
     cursor: pointer;
     margin-top: -8px;
-    /* You need to specify a margin in Chrome, but in Firefox and IE it is automatic */
+    /* You need to specify a margin in Chrome, Firefox and IE is automatic */
     box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
 }
 
