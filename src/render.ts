@@ -1,6 +1,7 @@
 import { els } from './elements';
 import { state } from './state';
 import { HistoryItem } from './types';
+import { remoteEventHooks } from './remote-event-hooks';
 
 export function renderScript(): void {
     els.scriptContent.innerHTML = '';
@@ -87,7 +88,29 @@ function smoothScrollTo(element: HTMLElement, target: number, duration: number):
 }
 
 export function advancePastSkipped(): void {
-    while (state.currentIndex < state.scriptWords.length && state.scriptWords[state.currentIndex].skip) state.currentIndex++;
+    while (state.currentIndex < state.scriptWords.length && state.scriptWords[state.currentIndex].skip) {
+        const first = state.scriptWords[state.currentIndex];
+        if (first.word.startsWith('[')) {
+            const markerWords: string[] = [];
+            let i = state.currentIndex;
+
+            while (i < state.scriptWords.length && state.scriptWords[i].skip) {
+                markerWords.push(state.scriptWords[i].word);
+                const closesMarker = state.scriptWords[i].word.includes(']');
+                i++;
+
+                if (closesMarker) {
+                    remoteEventHooks.HookMarker({ marker: markerWords.join(' ') });
+                    state.currentIndex = i;
+                    break;
+                }
+            }
+
+            if (state.currentIndex === i) continue;
+        }
+
+        state.currentIndex++;
+    }
 }
 
 export function restartScript(): void {
