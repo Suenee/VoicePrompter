@@ -21,6 +21,7 @@ export interface AppConfig {
     showStopIcon: boolean;
     preserveFormatting: boolean;
     voiceCommandsEnabled: boolean;
+    navigationControlsEnabled: boolean;
     paragraphSpacing: number;
     smoothAnimations: boolean;
     highlightActiveWord: boolean;
