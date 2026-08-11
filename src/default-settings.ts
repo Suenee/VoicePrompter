@@ -11,6 +11,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     showStopIcon: false,
     preserveFormatting: true,
     voiceCommandsEnabled: false,
+    navigationControlsEnabled: false,
     paragraphSpacing: 0.5,
     smoothAnimations: false,
     highlightActiveWord: true,
