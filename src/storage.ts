@@ -2,6 +2,7 @@ import { HistoryItem } from './types';
 
 const HISTORY_KEY = 'teleprompter_history';
 const SETTINGS_KEY = 'teleprompter_settings';
+const GDOC_REMEMBER_KEY = 'voiceprompter_gdoc_remember';
 
 type StoredSettings = Record<string, unknown>;
 
@@ -35,9 +36,13 @@ export function saveSettings(settings: StoredSettings): void {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
 }
 
-/** Clears user preferences only. Script history is deliberately preserved. */
+/**
+ * Clears user preferences and temporary UI remembers only.
+ * Script history is deliberately preserved.
+ */
 export function resetSettings(): void {
     localStorage.removeItem(SETTINGS_KEY);
+    localStorage.removeItem(GDOC_REMEMBER_KEY);
 }
 
 export function getHistory(): HistoryItem[] {
