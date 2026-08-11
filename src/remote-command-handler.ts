@@ -167,38 +167,44 @@ export class RemoteCommandHandler {
         this.sender(message);
     }
 
-    private count(args: JsonObject): number {
-        const raw = args.offset;
-        if (raw === undefined) return 1;
-        return Math.abs(raw as number);
+    private offset(args: JsonObject): number {
+        return args.offset === undefined ? 0 : args.offset as number;
     }
 
-    private nextDirection(args: JsonObject): 1 | -1 {
-        const raw = args.offset;
-        if (raw === undefined || (raw as number) >= 0) return 1;
-        return -1;
+    private relativeDirection(offset: number, defaultDirection: 1 | -1): 1 | -1 {
+        if (offset < 0) return defaultDirection === 1 ? -1 : 1;
+        return defaultDirection;
     }
 
     public async goStart(args: JsonObject): Promise<void> {
         console.log('[VPP] goStart()', args);
-        const { goStart } = await import('./navigation');
-        goStart();
+        const offset = Math.abs(this.offset(args));
+        const navigation = await import('./navigation');
+        navigation.goStart();
+        if (offset === 0) return;
+        const { navigateParagraphs } = await import('./render');
+        navigateParagraphs('forward', offset);
     }
 
     public async markerBack(args: JsonObject): Promise<void> {
         console.log('[VPP] markerBack()', args);
-        const count = this.count(args);
+        const offset = this.offset(args);
+        const count = Math.abs(offset);
         if (count === 0) return;
-        const { goPreviousCue } = await import('./navigation');
-        for (let i = 0; i < count; i++) goPreviousCue();
+        const direction = this.relativeDirection(offset, -1);
+        const navigation = await import('./navigation');
+        const step = direction < 0 ? navigation.goPreviousCue : navigation.goNextCue;
+        for (let i = 0; i < count; i++) step();
     }
 
     public async goBack(args: JsonObject): Promise<void> {
         console.log('[VPP] goBack()', args);
-        const count = this.count(args);
+        const offset = this.offset(args);
+        const count = Math.abs(offset);
         if (count === 0) return;
+        const direction = this.relativeDirection(offset, -1);
         const { navigateParagraphs } = await import('./render');
-        navigateParagraphs('back', count);
+        navigateParagraphs(direction < 0 ? 'back' : 'forward', count);
     }
 
     public async goCurrent(args: JsonObject): Promise<void> {
@@ -209,18 +215,20 @@ export class RemoteCommandHandler {
 
     public async goNext(args: JsonObject): Promise<void> {
         console.log('[VPP] goNext()', args);
-        const count = this.count(args);
+        const offset = this.offset(args);
+        const count = Math.abs(offset);
         if (count === 0) return;
-        const direction = this.nextDirection(args);
+        const direction = this.relativeDirection(offset, 1);
         const { navigateParagraphs } = await import('./render');
         navigateParagraphs(direction < 0 ? 'back' : 'forward', count);
     }
 
     public async markerNext(args: JsonObject): Promise<void> {
         console.log('[VPP] markerNext()', args);
-        const count = this.count(args);
+        const offset = this.offset(args);
+        const count = Math.abs(offset);
         if (count === 0) return;
-        const direction = this.nextDirection(args);
+        const direction = this.relativeDirection(offset, 1);
         const navigation = await import('./navigation');
         const step = direction < 0 ? navigation.goPreviousCue : navigation.goNextCue;
         for (let i = 0; i < count; i++) step();
@@ -228,8 +236,12 @@ export class RemoteCommandHandler {
 
     public async goFinish(args: JsonObject): Promise<void> {
         console.log('[VPP] goFinish()', args);
-        const { goFinish } = await import('./navigation');
-        goFinish();
+        const offset = Math.abs(this.offset(args));
+        const navigation = await import('./navigation');
+        navigation.goFinish();
+        if (offset === 0) return;
+        const { navigateParagraphs } = await import('./render');
+        navigateParagraphs('back', offset);
     }
 }
 
