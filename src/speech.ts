@@ -2,6 +2,7 @@ import { state } from './state';
 import { els } from './elements';
 import { updateMicUI, updateHighlight, scrollToCurrent, advancePastSkipped, restartScript, navigateParagraphs } from './render';
 import { goCurrentParagraph, goNextCue, goPreviousCue } from './navigation';
+import { getVoiceCommandAliases, VoiceCommandAction } from './voice-command-settings';
 
 let lastMatchedWord = '';
 let speechBlocked = false;
@@ -11,6 +12,19 @@ let gotResultOnFirstStart = false;
 const voiceDebugEnabled = new URLSearchParams(window.location.search).get('debug') === 'voice';
 
 function showBrowserWarning() { els.browserWarning.classList.remove('hidden'); }
+
+function runVoiceCommand(action: VoiceCommandAction): void {
+    if (action === 'goStart') restartScript();
+    else if (action === 'goFinish') {
+        state.currentIndex = Math.max(0, state.scriptWords.length - 1);
+        updateHighlight();
+        scrollToCurrent();
+    } else if (action === 'goNext') navigateParagraphs('forward', 1);
+    else if (action === 'goBack') navigateParagraphs('back', 1);
+    else if (action === 'goCurrent') goCurrentParagraph();
+    else if (action === 'cueNext') goNextCue();
+    else if (action === 'cueBack') goPreviousCue();
+}
 
 export function initSpeech(): void {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -29,20 +43,20 @@ export function initSpeech(): void {
         if (state.config.voiceCommandsEnabled) {
             const normalizedTranscript = transcript.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
             const cleanTokens = normalizedTranscript.split(/\s+/).filter(t => t.length > 0);
-            const commands = ['cue back', 'cue next', 'go current', 'go start', 'go finish', 'go next', 'go back'];
-            const commandMatched = commands.find(command => {
-                const tokens = command.split(' ');
-                return cleanTokens.length >= tokens.length && cleanTokens.slice(-tokens.length).join(' ') === command;
+            const aliases = getVoiceCommandAliases();
+            const matched = aliases.find(alias => {
+                const tokens = alias.phrase.split(/\s+/).filter(Boolean);
+                return cleanTokens.length >= tokens.length && cleanTokens.slice(-tokens.length).join(' ') === alias.phrase;
             }) || null;
 
             if (voiceDebugEnabled) {
                 console.log(`[VoiceDebug] Heard: "${transcript.trim()}"`);
                 console.log(`[VoiceDebug] Normalized: "${normalizedTranscript}"`);
-                console.log(`[VoiceDebug] Command: ${commandMatched || 'none'}`);
+                console.log(`[VoiceDebug] Command: ${matched ? `${matched.action} <= "${matched.phrase}"` : 'none'}`);
             }
 
-            if (commandMatched) {
-                const commandTokens = commandMatched.split(' ');
+            if (matched) {
+                const commandTokens = matched.phrase.split(/\s+/).filter(Boolean);
                 const startIdx = Math.max(0, state.currentIndex - 4);
                 const endIdx = Math.min(state.scriptWords.length, state.currentIndex + 10);
                 const windowScript = state.scriptWords.slice(startIdx, endIdx).map(w => w.word.toLowerCase().replace(/[^\w\s]/g, ''));
@@ -55,16 +69,8 @@ export function initSpeech(): void {
 
                 if (!conflict && commandArmed) {
                     commandArmed = false;
-                    console.log(`[VoiceCommand] TRIGGER: ${commandMatched}`);
-                    if (commandMatched === 'go start') restartScript();
-                    else if (commandMatched === 'go finish') {
-                        state.currentIndex = Math.max(0, state.scriptWords.length - 1);
-                        updateHighlight(); scrollToCurrent();
-                    } else if (commandMatched === 'go next') navigateParagraphs('forward', 1);
-                    else if (commandMatched === 'go back') navigateParagraphs('back', 1);
-                    else if (commandMatched === 'go current') goCurrentParagraph();
-                    else if (commandMatched === 'cue next') goNextCue();
-                    else if (commandMatched === 'cue back') goPreviousCue();
+                    console.log(`[VoiceCommand] TRIGGER: ${matched.action} <= "${matched.phrase}"`);
+                    runVoiceCommand(matched.action);
                     lastMatchedWord = '';
                     return;
                 }
