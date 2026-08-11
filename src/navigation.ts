@@ -26,8 +26,6 @@ export function goCurrentParagraph(): void {
         }
     }
 
-    // Skip any cue/other skipped tokens at the paragraph start so the comparison
-    // uses the same readable position applyTarget() will ultimately select.
     let readableTarget = target;
     while (readableTarget < state.scriptWords.length && state.scriptWords[readableTarget].skip) {
         readableTarget++;
@@ -75,10 +73,6 @@ export function goPreviousCue(): void {
     let previousCue = -1;
     for (let i = 0; i < state.currentIndex; i++) {
         if (!isCueStart(i)) continue;
-
-        // A cue counts as "previous" only if its readable destination is strictly
-        // before the current position. This makes repeated presses continue to the
-        // next earlier cue instead of selecting the same cue again.
         if (readableAfterCue(i) < state.currentIndex) previousCue = i;
         i = cueEnd(i);
     }
@@ -92,12 +86,17 @@ export function goFinish(): void {
     applyTarget(state.scriptWords.length - 1);
 }
 
+function applyConfiguredDockOpacity(): void {
+    const dock = document.getElementById('mainControlsDock');
+    if (!dock) return;
+    dock.style.opacity = (state.config.dockOpacity / 100).toString();
+}
+
 function initNavigationControls(): void {
     if (document.getElementById('navigationControlsGroup')) return;
     const mainDock = document.getElementById('mainControlsDock');
     if (!mainDock) return;
 
-    // Keep all prompter controls in one row so the control surface stays compact.
     const group = document.createElement('div');
     group.id = 'navigationControlsGroup';
     group.className = 'pointer-events-auto flex items-center gap-1 px-2 py-1.5 rounded-lg bg-neutral-900/80 backdrop-blur border border-neutral-700/70 shadow-lg font-mono text-sm text-neutral-300 flex-shrink-0';
@@ -112,9 +111,9 @@ function initNavigationControls(): void {
         <button data-nav="next-paragraph" title="Next Paragraph" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;&gt;</button>
         <button data-nav="finish" title="Go Finish" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;|</button>`;
 
-    // Put navigation at the beginning of the existing dock rather than creating a
-    // second fixed dock above it. It therefore inherits Recording Dock Opacity.
-    mainDock.insertBefore(group, mainDock.firstChild);
+    // Navigation belongs to the right side of the main dock so it cannot be
+    // visually confused with the Back-to-Editor button on the far left.
+    mainDock.appendChild(group);
     mainDock.classList.remove('gap-6');
     mainDock.classList.add('gap-3', 'px-3', 'flex-wrap');
 
@@ -132,6 +131,26 @@ function initNavigationControls(): void {
         button.type = 'button';
         button.addEventListener('click', () => actions[button.dataset.nav || '']?.());
     });
+
+    // Recording Dock Opacity is a dock appearance setting. Apply it immediately,
+    // not only while listening/recording, so the slider always has a live and
+    // predictable effect. This also keeps dynamically added navigation controls
+    // at exactly the same opacity as the original controls.
+    const opacityInput = document.getElementById('dockOpacityInput') as HTMLInputElement | null;
+    opacityInput?.addEventListener('input', () => {
+        requestAnimationFrame(applyConfiguredDockOpacity);
+    });
+
+    // Existing voice/video handlers may restore inline opacity after stopping.
+    // Re-apply the configured value after those handlers finish so the setting is
+    // never silently overridden.
+    ['micButton', 'videoRecordBtn', 'videoStopBtn', 'videoModeBtn'].forEach(id => {
+        document.getElementById(id)?.addEventListener('click', () => {
+            window.setTimeout(applyConfiguredDockOpacity, 0);
+        });
+    });
+
+    applyConfiguredDockOpacity();
 }
 
 if (document.readyState === 'loading') {
