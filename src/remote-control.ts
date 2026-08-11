@@ -1,48 +1,10 @@
 import { loadSetting, saveSetting } from './storage';
-import { state } from './state';
 
 const DEFAULT_IP = '127.0.0.1';
 const DEFAULT_PORT = 8170;
 const DEFAULT_API_KEY = '';
 const GDOC_REMEMBER_KEY = 'voiceprompter_gdoc_remember';
 const GDOC_REMEMBER_DAYS = 7;
-
-const SUPPORTED_BROWSER_LANGS: Record<string, { id: string; name: string }> = {
-    en: { id: 'en-US', name: 'English' },
-    es: { id: 'es-ES', name: 'Spanish' },
-    fr: { id: 'fr-FR', name: 'French' },
-    de: { id: 'de-DE', name: 'German' },
-    it: { id: 'it-IT', name: 'Italian' },
-    pt: { id: 'pt-PT', name: 'Portuguese' },
-    ru: { id: 'ru-RU', name: 'Russian' },
-    ja: { id: 'ja-JP', name: 'Japanese' },
-    zh: { id: 'zh-CN', name: 'Chinese' },
-    ko: { id: 'ko-KR', name: 'Korean' },
-    ar: { id: 'ar-SA', name: 'Arabic' },
-    nl: { id: 'nl-NL', name: 'Dutch' },
-    pl: { id: 'pl-PL', name: 'Polish' },
-    uk: { id: 'uk-UA', name: 'Ukrainian' },
-    hi: { id: 'hi-IN', name: 'Hindi' },
-    tr: { id: 'tr-TR', name: 'Turkish' },
-    sv: { id: 'sv-SE', name: 'Swedish' },
-    da: { id: 'da-DK', name: 'Danish' },
-    fi: { id: 'fi-FI', name: 'Finnish' },
-    no: { id: 'no-NO', name: 'Norwegian' },
-    id: { id: 'id-ID', name: 'Indonesian' },
-    ms: { id: 'ms-MY', name: 'Malay' },
-    ca: { id: 'ca-ES', name: 'Catalan' },
-    cs: { id: 'cs-CZ', name: 'Czech' },
-    el: { id: 'el-GR', name: 'Greek' },
-    he: { id: 'he-IL', name: 'Hebrew' },
-    hu: { id: 'hu-HU', name: 'Hungarian' },
-    ro: { id: 'ro-RO', name: 'Romanian' },
-    sk: { id: 'sk-SK', name: 'Slovak' },
-    th: { id: 'th-TH', name: 'Thai' },
-    vi: { id: 'vi-VN', name: 'Vietnamese' },
-    bg: { id: 'bg-BG', name: 'Bulgarian' },
-    hr: { id: 'hr-HR', name: 'Croatian' },
-    sr: { id: 'sr-RS', name: 'Serbian' }
-};
 
 let socket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
@@ -179,57 +141,8 @@ function initGoogleDocRemember(): void {
     observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
 }
 
-function getSupportedBrowserLanguage(): { id: string; name: string } | null {
-    const candidates = [...(navigator.languages || []), navigator.language].filter(Boolean);
-    for (const candidate of candidates) {
-        const base = candidate.toLowerCase().split('-')[0];
-        const supported = SUPPORTED_BROWSER_LANGS[base];
-        if (supported) return supported;
-    }
-    return null;
-}
-
-function showBrowserLanguageStatus(language: { id: string; name: string }): void {
-    document.querySelectorAll<HTMLElement>('.dropdown-title').forEach(title => {
-        title.textContent = `Automatic (${language.name} – browser)`;
-        title.classList.add('text-white');
-        title.classList.remove('text-neutral-300');
-    });
-    document.querySelectorAll<HTMLElement>('.auto-detected-label').forEach(label => {
-        label.textContent = `${language.name} from browser`;
-    });
-}
-
-function applyBrowserLanguageFallback(): boolean {
-    if (state.languageSetting !== 'auto') return false;
-    const browserLanguage = getSupportedBrowserLanguage();
-    if (!browserLanguage) return false;
-
-    state.selectedLanguage = browserLanguage.id;
-    state.detectedLanguage = browserLanguage.id;
-    if (state.recognition) state.recognition.lang = browserLanguage.id;
-    showBrowserLanguageStatus(browserLanguage);
-
-    const warning = document.getElementById('langDetectionWarning');
-    warning?.classList.add('hidden');
-    return true;
-}
-
-function initBrowserLanguageFallback(): void {
-    const warning = document.getElementById('langDetectionWarning');
-    if (!warning) return;
-
-    const observer = new MutationObserver(() => {
-        if (!warning.classList.contains('hidden')) applyBrowserLanguageFallback();
-    });
-    observer.observe(warning, { attributes: true, attributeFilter: ['class'] });
-
-    if (!warning.classList.contains('hidden')) applyBrowserLanguageFallback();
-}
-
 window.addEventListener('DOMContentLoaded', () => {
     initGoogleDocRemember();
-    initBrowserLanguageFallback();
     if (document.getElementById('remoteControlSettingsRow')) return;
     const row = createSettingsRow();
     if (!row) return;
