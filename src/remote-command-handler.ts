@@ -1,3 +1,13 @@
+import {
+    goStart as navigateGoStart,
+    goPreviousParagraph,
+    goCurrentParagraph,
+    goNextParagraph,
+    goPreviousCue,
+    goNextCue,
+    goFinish as navigateGoFinish
+} from './navigation';
+
 type JsonObject = Record<string, unknown>;
 type Sender = (message: JsonObject) => void;
 
@@ -124,7 +134,6 @@ export class RemoteCommandHandler {
     private rejectInvalidMessage(message: JsonObject, reason: string): void {
         console.warn(`[VPP] DROPPED - INVALID VPP MESSAGE: ${reason}`, message);
 
-        // If an id is available, a protocol error can be correlated to the invalid message.
         if (typeof message.id === 'string' && message.id.trim() !== '') {
             this.sendError(message, 'INVALID_MESSAGE', 'Message does not conform to VoicePrompter Protocol', { reason });
         }
@@ -188,13 +197,40 @@ export class RemoteCommandHandler {
         this.sender(message);
     }
 
-    public goStart(args: JsonObject): void { console.log('[VPP] goStart()', args); }
-    public markerBack(args: JsonObject): void { console.log('[VPP] markerBack()', args); }
-    public goBack(args: JsonObject): void { console.log('[VPP] goBack()', args); }
-    public goCurrent(args: JsonObject): void { console.log('[VPP] goCurrent()', args); }
-    public goNext(args: JsonObject): void { console.log('[VPP] goNext()', args); }
-    public markerNext(args: JsonObject): void { console.log('[VPP] markerNext()', args); }
-    public goFinish(args: JsonObject): void { console.log('[VPP] goFinish()', args); }
+    public goStart(args: JsonObject): void {
+        console.log('[VPP] goStart()', args);
+        navigateGoStart();
+    }
+
+    public markerBack(args: JsonObject): void {
+        console.log('[VPP] markerBack()', args);
+        goPreviousCue();
+    }
+
+    public goBack(args: JsonObject): void {
+        console.log('[VPP] goBack()', args);
+        goPreviousParagraph();
+    }
+
+    public goCurrent(args: JsonObject): void {
+        console.log('[VPP] goCurrent()', args);
+        goCurrentParagraph();
+    }
+
+    public goNext(args: JsonObject): void {
+        console.log('[VPP] goNext()', args);
+        goNextParagraph();
+    }
+
+    public markerNext(args: JsonObject): void {
+        console.log('[VPP] markerNext()', args);
+        goNextCue();
+    }
+
+    public goFinish(args: JsonObject): void {
+        console.log('[VPP] goFinish()', args);
+        navigateGoFinish();
+    }
 }
 
 export const remoteCommandHandler = new RemoteCommandHandler();
