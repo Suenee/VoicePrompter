@@ -20,6 +20,9 @@ function runVoiceCommand(action: VoiceCommandAction): void {
     else if (action === 'cueNext') goNextCue();
     else if (action === 'cueBack') goPreviousCue();
 }
+function normalizeCommandText(value: string): string {
+    return value.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+}
 export function initSpeech(): void {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { showBrowserWarning(); return; }
@@ -27,17 +30,17 @@ export function initSpeech(): void {
     state.recognition.onresult = (event: any) => {
         if (isFirstStart) gotResultOnFirstStart = true;
         let transcript = ''; for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0].transcript;
-        const normalizedTranscript = transcript.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+        const normalizedTranscript = normalizeCommandText(transcript);
         const cleanTokens = normalizedTranscript.split(/\s+/).filter(t => t.length > 0);
         const aliases = getVoiceCommandAliases();
-        const matched = aliases.find(alias => { const tokens = alias.phrase.split(/\s+/).filter(Boolean); return cleanTokens.length >= tokens.length && cleanTokens.slice(-tokens.length).join(' ') === alias.phrase; }) || null;
+        const matched = aliases.find(alias => { const normalizedPhrase = normalizeCommandText(alias.phrase); const tokens = normalizedPhrase.split(/\s+/).filter(Boolean); return cleanTokens.length >= tokens.length && cleanTokens.slice(-tokens.length).join(' ') === normalizedPhrase; }) || null;
         reportVoiceCommandRecognition(transcript.trim(), matched?.action || null);
         if (state.config.voiceCommandsEnabled) {
             if (voiceDebugEnabled) { console.log(`[VoiceDebug] Heard: "${transcript.trim()}"`); console.log(`[VoiceDebug] Normalized: "${normalizedTranscript}"`); console.log(`[VoiceDebug] Command: ${matched ? `${matched.action} <= "${matched.phrase}"` : 'none'}`); }
             if (matched) {
-                const commandTokens = matched.phrase.split(/\s+/).filter(Boolean);
+                const commandTokens = normalizeCommandText(matched.phrase).split(/\s+/).filter(Boolean);
                 const startIdx = Math.max(0, state.currentIndex - 4), endIdx = Math.min(state.scriptWords.length, state.currentIndex + 10);
-                const windowScript = state.scriptWords.slice(startIdx, endIdx).map(w => w.word.toLowerCase().replace(/[^\w\s]/g, ''));
+                const windowScript = state.scriptWords.slice(startIdx, endIdx).map(w => normalizeCommandText(w.word));
                 let conflict = false;
                 for (let j = 0; j <= windowScript.length - commandTokens.length; j++) { if (commandTokens.every((token, offset) => windowScript[j + offset] === token)) { conflict = true; break; } }
                 if (voiceDebugEnabled) console.log(`[VoiceDebug] Armed: ${commandArmed}, conflict: ${conflict}`);
