@@ -27,7 +27,7 @@ export function initSpeech(): void {
 
         if (state.config.voiceCommandsEnabled) {
             const cleanTokens = transcript.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(t => t.length > 0);
-            const commands = ['go previous cue', 'go next cue', 'go current', 'go start', 'go finish', 'go next', 'go back'];
+            const commands = ['cue back', 'cue next', 'go current', 'go start', 'go finish', 'go next', 'go back'];
             const commandMatched = commands.find(command => {
                 const tokens = command.split(' ');
                 return cleanTokens.length >= tokens.length && cleanTokens.slice(-tokens.length).join(' ') === command;
@@ -53,8 +53,8 @@ export function initSpeech(): void {
                     } else if (commandMatched === 'go next') navigateParagraphs('forward', 1);
                     else if (commandMatched === 'go back') navigateParagraphs('back', 1);
                     else if (commandMatched === 'go current') goCurrentParagraph();
-                    else if (commandMatched === 'go next cue') goNextCue();
-                    else if (commandMatched === 'go previous cue') goPreviousCue();
+                    else if (commandMatched === 'cue next') goNextCue();
+                    else if (commandMatched === 'cue back') goPreviousCue();
                     lastMatchedWord = '';
                     return;
                 }
