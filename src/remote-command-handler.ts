@@ -167,12 +167,16 @@ export class RemoteCommandHandler {
         this.sender(message);
     }
 
-    private offset(args: JsonObject, defaultDirection: 1 | -1): { direction: 1 | -1; count: number } {
+    private count(args: JsonObject): number {
         const raw = args.offset;
-        if (raw === undefined) return { direction: defaultDirection, count: 1 };
-        const value = raw as number;
-        if (value === 0) return { direction: defaultDirection, count: 0 };
-        return { direction: value < 0 ? -1 : 1, count: Math.abs(value) };
+        if (raw === undefined) return 1;
+        return Math.abs(raw as number);
+    }
+
+    private nextDirection(args: JsonObject): 1 | -1 {
+        const raw = args.offset;
+        if (raw === undefined || (raw as number) >= 0) return 1;
+        return -1;
     }
 
     public async goStart(args: JsonObject): Promise<void> {
@@ -183,19 +187,18 @@ export class RemoteCommandHandler {
 
     public async markerBack(args: JsonObject): Promise<void> {
         console.log('[VPP] markerBack()', args);
-        const { direction, count } = this.offset(args, -1);
+        const count = this.count(args);
         if (count === 0) return;
-        const navigation = await import('./navigation');
-        const step = direction < 0 ? navigation.goPreviousCue : navigation.goNextCue;
-        for (let i = 0; i < count; i++) step();
+        const { goPreviousCue } = await import('./navigation');
+        for (let i = 0; i < count; i++) goPreviousCue();
     }
 
     public async goBack(args: JsonObject): Promise<void> {
         console.log('[VPP] goBack()', args);
-        const { direction, count } = this.offset(args, -1);
+        const count = this.count(args);
         if (count === 0) return;
         const { navigateParagraphs } = await import('./render');
-        navigateParagraphs(direction < 0 ? 'back' : 'forward', count);
+        navigateParagraphs('back', count);
     }
 
     public async goCurrent(args: JsonObject): Promise<void> {
@@ -206,16 +209,18 @@ export class RemoteCommandHandler {
 
     public async goNext(args: JsonObject): Promise<void> {
         console.log('[VPP] goNext()', args);
-        const { direction, count } = this.offset(args, 1);
+        const count = this.count(args);
         if (count === 0) return;
+        const direction = this.nextDirection(args);
         const { navigateParagraphs } = await import('./render');
         navigateParagraphs(direction < 0 ? 'back' : 'forward', count);
     }
 
     public async markerNext(args: JsonObject): Promise<void> {
         console.log('[VPP] markerNext()', args);
-        const { direction, count } = this.offset(args, 1);
+        const count = this.count(args);
         if (count === 0) return;
+        const direction = this.nextDirection(args);
         const navigation = await import('./navigation');
         const step = direction < 0 ? navigation.goPreviousCue : navigation.goNextCue;
         for (let i = 0; i < count; i++) step();
