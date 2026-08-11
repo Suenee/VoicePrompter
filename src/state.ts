@@ -3,10 +3,7 @@ import { DEFAULT_APP_CONFIG, DEFAULT_USER_SETTINGS } from './default-settings';
 import { loadSetting, resetSettings, saveSetting } from './storage';
 
 const restoredConfig = Object.fromEntries(
-    Object.entries(DEFAULT_APP_CONFIG).map(([key, defaultValue]) => [
-        key,
-        loadSetting(key, defaultValue)
-    ])
+    Object.entries(DEFAULT_APP_CONFIG).map(([key, defaultValue]) => [key, loadSetting(key, defaultValue)])
 ) as unknown as AppConfig;
 
 const persistentConfig = new Proxy(restoredConfig, {
@@ -18,52 +15,30 @@ const persistentConfig = new Proxy(restoredConfig, {
 });
 
 const initialState: AppState = {
-    scriptWords: [],
-    currentIndex: 0,
-    recognition: null,
-    isListening: false,
+    scriptWords: [], currentIndex: 0, recognition: null, isListening: false,
     isMirrored: loadSetting('isMirrored', DEFAULT_USER_SETTINGS.isMirrored),
     isMirroredH: loadSetting('isMirroredH', DEFAULT_USER_SETTINGS.isMirroredH),
     isScreenRotated: loadSetting('isScreenRotated', DEFAULT_USER_SETTINGS.isScreenRotated),
-    selectedLanguage: 'en-US',
-    languageSetting: DEFAULT_USER_SETTINGS.dictationLanguage,
-    detectedLanguage: null,
+    selectedLanguage: 'en-US', languageSetting: DEFAULT_USER_SETTINGS.dictationLanguage, detectedLanguage: null,
     config: persistentConfig,
-    isVideoMode: false,
-    videoLayoutMode: 'split',
-    facingMode: 'user',
-    isRecording: false,
-    mediaRecorder: null,
-    mediaStream: null,
-    recordedChunks: [],
-    googleDocUrl: null,
+    isVideoMode: false, videoLayoutMode: 'split', facingMode: 'user', isRecording: false,
+    mediaRecorder: null, mediaStream: null, recordedChunks: [], googleDocUrl: null,
     selectedVideoDeviceId: loadSetting('selectedVideoDeviceId', DEFAULT_USER_SETTINGS.selectedVideoDeviceId),
     selectedAudioDeviceId: loadSetting('selectedAudioDeviceId', DEFAULT_USER_SETTINGS.selectedAudioDeviceId)
 };
 
 const persistentStateKeys = new Set<keyof AppState>([
-    'isMirrored',
-    'isMirroredH',
-    'isScreenRotated',
-    'selectedVideoDeviceId',
-    'selectedAudioDeviceId'
+    'isMirrored', 'isMirroredH', 'isScreenRotated', 'selectedVideoDeviceId', 'selectedAudioDeviceId'
 ]);
 
 export const state = new Proxy(initialState, {
     set(target, property, value) {
         Reflect.set(target, property, value);
-        if (persistentStateKeys.has(property as keyof AppState)) {
-            saveSetting(String(property), value);
-        }
+        if (persistentStateKeys.has(property as keyof AppState)) saveSetting(String(property), value);
         return true;
     }
 });
 
-/**
- * main.ts already initializes the settings UI. DOMContentLoaded runs afterwards,
- * so this final pass synchronizes controls whose original defaults were hard-coded
- * in HTML and restores visual-only modes such as mirroring and rotation.
- */
 window.addEventListener('DOMContentLoaded', () => {
     const setCheckbox = (id: string, checked: boolean) => {
         const input = document.getElementById(id) as HTMLInputElement | null;
@@ -72,6 +47,10 @@ window.addEventListener('DOMContentLoaded', () => {
     const setInput = (id: string, value: string) => {
         const input = document.getElementById(id) as HTMLInputElement | null;
         if (input) input.value = value;
+    };
+    const setText = (id: string, value: string) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
     };
 
     setCheckbox('mirrorToggle', state.isMirrored);
@@ -94,6 +73,25 @@ window.addEventListener('DOMContentLoaded', () => {
     setInput('soundSensitivityInput', String(state.config.soundSensitivity));
     setInput('textColorInput', state.config.textColor);
     setInput('bgColorInput', state.config.bgColor);
+
+    setText('fontSizeVal', `${state.config.fontSize}px`);
+    setText('lineHeightVal', `${state.config.lineHeight}x`);
+    setText('paragraphSpacingVal', `${state.config.paragraphSpacing}em`);
+    setText('marginVal', `${state.config.margin}%`);
+    setText('dockOpacityVal', `${state.config.dockOpacity}%`);
+    setText('activeLinePositionVal', `${state.config.activeLinePosition}%`);
+    setText('lookaheadWordsVal', String(state.config.lookaheadWords));
+    setText('scrollSpeedVal', `${state.config.scrollSpeed} w/s`);
+    setText('soundSensitivityVal', `${Math.round(state.config.soundSensitivity * 100)}%`);
+
+    const scriptContent = document.getElementById('scriptContent');
+    if (scriptContent) {
+        scriptContent.style.fontSize = `${state.config.fontSize}px`;
+        scriptContent.style.lineHeight = String(state.config.lineHeight);
+        scriptContent.style.paddingLeft = `${state.config.margin}%`;
+        scriptContent.style.paddingRight = `${state.config.margin}%`;
+        scriptContent.style.setProperty('--paragraph-spacing', `${state.config.paragraphSpacing}em`);
+    }
 
     document.getElementById('scrollContainer')?.classList.toggle('mirror-mode', state.isMirrored);
     document.getElementById('scrollContainer')?.classList.toggle('mirror-mode-h', state.isMirroredH);
@@ -119,10 +117,7 @@ window.addEventListener('DOMContentLoaded', () => {
         settingsPanel.appendChild(resetSection);
 
         document.getElementById('resetSettingsDefaultsBtn')?.addEventListener('click', () => {
-            const confirmed = window.confirm(
-                'Reset all VoicePrompter settings to their original defaults?\n\nYour script history will be preserved.'
-            );
-            if (!confirmed) return;
+            if (!window.confirm('Reset all VoicePrompter settings to their original defaults?\n\nYour script history will be preserved.')) return;
             resetSettings();
             window.location.reload();
         });
