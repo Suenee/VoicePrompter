@@ -1,38 +1,18 @@
 import { AppState } from './types';
+import { DEFAULT_APP_CONFIG, DEFAULT_USER_SETTINGS } from './default-settings';
 
 export const state: AppState = {
     scriptWords: [],
     currentIndex: 0,
     recognition: null,
     isListening: false,
-    isMirrored: false,
-    isMirroredH: false,
-    isScreenRotated: false,
+    isMirrored: DEFAULT_USER_SETTINGS.isMirrored,
+    isMirroredH: DEFAULT_USER_SETTINGS.isMirroredH,
+    isScreenRotated: DEFAULT_USER_SETTINGS.isScreenRotated,
     selectedLanguage: 'en-US', // Target language for SpeechRecognition
-    languageSetting: 'auto', // User's dropdown preference
+    languageSetting: DEFAULT_USER_SETTINGS.dictationLanguage, // User's dropdown preference
     detectedLanguage: null,
-    config: {
-        fontSize: 40,
-        lineHeight: 1.0,
-        margin: 0,
-        textColor: '#ffffff',
-        bgColor: '#000000',
-        textAlign: 'left',
-        textDirection: 'ltr',
-        showStopIcon: false,
-        preserveFormatting: true,
-        voiceCommandsEnabled: false,
-        paragraphSpacing: 0.5,
-        smoothAnimations: false,
-        highlightActiveWord: true,
-        activeLinePosition: 35, // Default to 35% from top
-        lookaheadWords: 5, // Default lookahead
-        dockOpacity: 50, // Default dock opacity (50%)
-        fontFamily: 'mono', // Default font
-        scrollingMode: 'voice',
-        scrollSpeed: 3.5,
-        soundSensitivity: 0.75
-    },
+    config: { ...DEFAULT_APP_CONFIG },
     // Video recording state
     isVideoMode: false,
     videoLayoutMode: 'split',
@@ -42,6 +22,6 @@ export const state: AppState = {
     mediaStream: null,
     recordedChunks: [],
     googleDocUrl: null,
-    selectedVideoDeviceId: null,
-    selectedAudioDeviceId: null
+    selectedVideoDeviceId: DEFAULT_USER_SETTINGS.selectedVideoDeviceId,
+    selectedAudioDeviceId: DEFAULT_USER_SETTINGS.selectedAudioDeviceId
 };
