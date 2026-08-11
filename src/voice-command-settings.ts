@@ -58,10 +58,11 @@ function createModal(): HTMLElement {
     modal.innerHTML = `
         <div class="relative bg-neutral-900 border border-neutral-700 rounded-xl p-6 max-w-lg w-full shadow-2xl shadow-black/50">
             <h2 class="text-xl font-bold text-white mb-2">Voice Commands</h2>
-            <p class="text-xs text-neutral-500 mb-3">Say the command words while the microphone is listening. “Heard” shows what the computer understood, so you can tune the phrases below. Separate alternatives with commas.</p>
-            <div class="grid grid-cols-2 gap-4 mb-5 px-3 py-2.5 rounded-lg bg-neutral-950/60 border border-neutral-800 font-mono text-xs">
-                <div class="min-w-0"><span class="text-neutral-500">Heard:</span> <span id="voiceCommandsHeard" class="text-white break-words">—</span></div>
-                <div class="min-w-0 text-right"><span class="text-neutral-500">Matched:</span> <span id="voiceCommandsMatched" class="text-[#FFBB00] break-words">—</span></div>
+            <p class="text-xs text-neutral-500 mb-3">Say the command words while the microphone is enabled and listening. “Heard” shows what the computer understood, so you can tune the phrases below. Separate alternatives with commas.</p>
+            <div class="grid grid-cols-[1fr_auto_1fr] gap-4 mb-5 px-3 py-2.5 rounded-lg bg-neutral-950/60 border border-neutral-800 font-mono text-xs items-center">
+                <div class="min-w-0 whitespace-nowrap overflow-hidden text-ellipsis"><span class="text-neutral-500">Heard:</span> <span id="voiceCommandsHeard" class="text-white">—</span></div>
+                <div class="min-w-[150px] text-center"><span class="text-neutral-500">Matched:</span> <span id="voiceCommandsMatched" class="text-[#FFBB00]">—</span></div>
+                <div></div>
             </div>
             <div class="space-y-3">${rows}</div>
             <div class="flex items-center justify-end gap-3 mt-6">
