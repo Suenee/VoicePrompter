@@ -1,3 +1,4 @@
+import './remote-control';
 import { AppConfig, AppState } from './types';
 import { DEFAULT_APP_CONFIG, DEFAULT_USER_SETTINGS } from './default-settings';
 import { loadSetting, resetSettings, saveSetting } from './storage';
