@@ -80,6 +80,18 @@ export function initSpeech(): void {
 
     state.recognition.onerror = (e: any) => {
         console.log('error:', e.error, e.message);
+
+        // Silence is normal while using a teleprompter. Some browser SpeechRecognition
+        // implementations end the current recognition session with "no-speech" after
+        // a period of silence. Keep the VP listening state active; onend will restart
+        // recognition automatically. Mark the first start as completed so the generic
+        // first-start failure guard below does not turn listening off.
+        if (e.error === 'no-speech') {
+            isFirstStart = false;
+            if (voiceDebugEnabled) console.log('[VoiceDebug] no-speech: keeping listening active; recognition will restart on end');
+            return;
+        }
+
         if (isFirstStart && !gotResultOnFirstStart) { isFirstStart = false; state.isListening = false; updateMicUI(false); }
         if (e.error === 'aborted') {
             speechBlocked = true;
@@ -88,7 +100,7 @@ export function initSpeech(): void {
             if (isIPad && isPWA) els.ipadPwaWarning.classList.remove('hidden');
             state.isListening = false; updateMicUI(false); return;
         }
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture' || e.error === 'network' || e.error === 'no-speech' || e.error === 'language-not-supported') {
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture' || e.error === 'network' || e.error === 'language-not-supported') {
             state.isListening = false; updateMicUI(false);
         }
     };
