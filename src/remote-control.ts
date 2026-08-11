@@ -35,6 +35,7 @@ function clearReconnectTimer(): void {
 }
 function disconnect(): void {
     clearReconnectTimer();
+    remoteCommandHandler.setSender(null);
     if (socket) { socket.onclose = null; socket.close(); socket = null; }
 }
 function connect(): void {
@@ -45,11 +46,16 @@ function connect(): void {
     const url = `ws://${ip}:${port}/vp${auth}`;
     try {
         socket = new WebSocket(url);
+        remoteCommandHandler.setSender(message => {
+            if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+            else console.warn('[RemoteControl] Cannot send VPP message: WebSocket is not open', message);
+        });
         socket.onopen = () => { clearReconnectTimer(); console.info(`[RemoteControl] Connected to ${url}`); };
         socket.onmessage = event => remoteCommandHandler.handle(event.data);
         socket.onerror = () => console.warn(`[RemoteControl] WebSocket connection failed: ${url}`);
         socket.onclose = () => {
             socket = null;
+            remoteCommandHandler.setSender(null);
             if (!getEnabled()) return;
             reconnectTimer = window.setTimeout(connect, 2000);
         };
