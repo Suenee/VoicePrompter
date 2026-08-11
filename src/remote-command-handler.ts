@@ -10,6 +10,8 @@ type PublicMethod =
     | 'markerNext'
     | 'goFinish';
 
+type MessageType = 'call' | 'event' | 'progress' | 'response' | 'error';
+
 interface CallMessage extends JsonObject {
     protocolVersion: number;
     id: string;
@@ -32,6 +34,8 @@ export class RemoteCommandHandler {
         goFinish: args => this.goFinish(args)
     };
 
+    private readonly messageTypes = new Set<MessageType>(['call', 'event', 'progress', 'response', 'error']);
+
     setSender(sender: Sender | null): void {
         this.sender = sender;
     }
@@ -43,16 +47,21 @@ export class RemoteCommandHandler {
         try {
             const parsed = JSON.parse(text);
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                console.warn('[VPP] Ignored non-object JSON message:', parsed);
+                console.warn('[VPP] DROPPED - INVALID VPP MESSAGE: top-level JSON value must be an object', parsed);
                 return;
             }
             message = parsed as JsonObject;
         } catch {
-            console.warn('[VPP] Ignored non-JSON message:', text);
+            // VPBridge should already reject this at transport level. Keep the receiver defensive.
+            console.warn('[VPP] DROPPED - INVALID JSON:', text);
             return;
         }
 
-        console.log('[VPP] Message received:', message);
+        const envelopeError = this.validateEnvelope(message);
+        if (envelopeError) {
+            this.rejectInvalidMessage(message, envelopeError);
+            return;
+        }
 
         if (message.protocolVersion !== 1) {
             this.sendError(message, 'UNSUPPORTED_PROTOCOL_VERSION', 'Unsupported protocol version', {
@@ -62,18 +71,66 @@ export class RemoteCommandHandler {
             return;
         }
 
-        if (message.type !== 'call') {
-            console.log(`[VPP] ${String(message.type ?? 'unknown')} received (no handler yet):`, message);
+        console.log('[VPP] Message received:', message);
+
+        if (message.type === 'call') {
+            const callError = this.validateCall(message);
+            if (callError) {
+                this.rejectInvalidMessage(message, callError);
+                return;
+            }
+            this.handleCall(message as CallMessage);
             return;
         }
 
-        this.handleCall(message as CallMessage);
+        console.log(`[VPP] ${message.type} received (no handler yet):`, message);
+    }
+
+    private validateEnvelope(message: JsonObject): string | null {
+        if (typeof message.protocolVersion !== 'number' || !Number.isInteger(message.protocolVersion)) {
+            return 'protocolVersion must be an integer';
+        }
+        if (typeof message.id !== 'string' || message.id.trim() === '') {
+            return 'id must be a non-empty string';
+        }
+        if (typeof message.type !== 'string' || !this.messageTypes.has(message.type as MessageType)) {
+            return 'type must be one of: call, event, progress, response, error';
+        }
+        if (message.source !== undefined && (!message.source || typeof message.source !== 'object' || Array.isArray(message.source))) {
+            return 'source must be an object when present';
+        }
+        if (message.timestamp !== undefined && (typeof message.timestamp !== 'string' || message.timestamp.trim() === '')) {
+            return 'timestamp must be a non-empty string when present';
+        }
+        if (message.correlationId !== undefined && (typeof message.correlationId !== 'string' || message.correlationId.trim() === '')) {
+            return 'correlationId must be a non-empty string when present';
+        }
+        return null;
+    }
+
+    private validateCall(message: JsonObject): string | null {
+        if (typeof message.method !== 'string' || message.method.trim() === '') {
+            return 'call.method must be a non-empty string';
+        }
+        if (!message.args || typeof message.args !== 'object' || Array.isArray(message.args)) {
+            return 'call.args must be a JSON object';
+        }
+        if (message.expectsResponse !== undefined && typeof message.expectsResponse !== 'boolean') {
+            return 'call.expectsResponse must be boolean when present';
+        }
+        return null;
+    }
+
+    private rejectInvalidMessage(message: JsonObject, reason: string): void {
+        console.warn(`[VPP] DROPPED - INVALID VPP MESSAGE: ${reason}`, message);
+
+        // If an id is available, a protocol error can be correlated to the invalid message.
+        if (typeof message.id === 'string' && message.id.trim() !== '') {
+            this.sendError(message, 'INVALID_MESSAGE', 'Message does not conform to VoicePrompter Protocol', { reason });
+        }
     }
 
     private handleCall(call: CallMessage): void {
-        const args = call.args && typeof call.args === 'object' && !Array.isArray(call.args)
-            ? call.args
-            : {};
         const method = call.method as PublicMethod;
         const handler = this.publicMethods[method];
 
@@ -86,7 +143,7 @@ export class RemoteCommandHandler {
         }
 
         try {
-            handler(args);
+            handler(call.args);
             if (call.expectsResponse) {
                 this.send({
                     protocolVersion: 1,
