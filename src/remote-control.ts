@@ -1,4 +1,5 @@
 import { loadSetting, saveSetting } from './storage';
+import { remoteCommandHandler } from './remote-command-handler';
 
 const DEFAULT_IP = '127.0.0.1';
 const DEFAULT_PORT = 8170;
@@ -45,6 +46,7 @@ function connect(): void {
     try {
         socket = new WebSocket(url);
         socket.onopen = () => { clearReconnectTimer(); console.info(`[RemoteControl] Connected to ${url}`); };
+        socket.onmessage = event => remoteCommandHandler.handle(event.data);
         socket.onerror = () => console.warn(`[RemoteControl] WebSocket connection failed: ${url}`);
         socket.onclose = () => {
             socket = null;
