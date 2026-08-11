@@ -176,14 +176,31 @@ export class RemoteCommandHandler {
         return defaultDirection;
     }
 
+    private async jumpToEdgeWithOffset(edge: 'start' | 'finish', offset: number): Promise<void> {
+        const navigation = await import('./navigation');
+        if (offset === 0) {
+            if (edge === 'start') navigation.goStart();
+            else navigation.goFinish();
+            return;
+        }
+
+        const { state } = await import('./state');
+        const smoothAnimations = state.config.smoothAnimations;
+        state.config.smoothAnimations = false;
+        try {
+            if (edge === 'start') navigation.goStart();
+            else navigation.goFinish();
+        } finally {
+            state.config.smoothAnimations = smoothAnimations;
+        }
+
+        const { navigateParagraphs } = await import('./render');
+        navigateParagraphs(edge === 'start' ? 'forward' : 'back', offset);
+    }
+
     public async goStart(args: JsonObject): Promise<void> {
         console.log('[VPP] goStart()', args);
-        const offset = Math.abs(this.offset(args));
-        const navigation = await import('./navigation');
-        navigation.goStart();
-        if (offset === 0) return;
-        const { navigateParagraphs } = await import('./render');
-        navigateParagraphs('forward', offset);
+        await this.jumpToEdgeWithOffset('start', Math.abs(this.offset(args)));
     }
 
     public async markerBack(args: JsonObject): Promise<void> {
@@ -244,12 +261,7 @@ export class RemoteCommandHandler {
 
     public async goFinish(args: JsonObject): Promise<void> {
         console.log('[VPP] goFinish()', args);
-        const offset = Math.abs(this.offset(args));
-        const navigation = await import('./navigation');
-        navigation.goFinish();
-        if (offset === 0) return;
-        const { navigateParagraphs } = await import('./render');
-        navigateParagraphs('back', offset);
+        await this.jumpToEdgeWithOffset('finish', Math.abs(this.offset(args)));
     }
 }
 
