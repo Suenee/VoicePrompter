@@ -138,11 +138,11 @@ function initNavigationControls(): void {
     group.className = 'pointer-events-auto flex items-center gap-1 px-2 py-1.5 rounded-lg bg-neutral-900/80 backdrop-blur border border-neutral-700/70 shadow-lg font-mono text-sm text-neutral-300 flex-shrink-0';
     group.innerHTML = `
         <button data-nav="start" title="Go Start" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">|&lt;</button>
-        <button data-nav="previous-cue" title="Cue Back" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">[&lt;</button>
+        <button data-nav="previous-cue" title="Marker Back" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">[&lt;</button>
         <button data-nav="previous-paragraph" title="Go Back" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&lt;&lt;</button>
         <button data-nav="current-paragraph" title="Go Current" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&lt;|</button>
         <button data-nav="next-paragraph" title="Go Next" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;&gt;</button>
-        <button data-nav="next-cue" title="Cue Next" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">&gt;]</button>
+        <button data-nav="next-cue" title="Marker Next" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">&gt;]</button>
         <button data-nav="finish" title="Go Finish" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;|</button>`;
 
     mainDock.appendChild(group);
