@@ -165,14 +165,14 @@ export function updateMicUI(isListening: boolean): void {
         els.micIcon.classList.add('text-white');
         els.statusIndicator.textContent = isVoice ? "Listening..." : "Scrolling...";
         els.statusIndicator.classList.remove('text-neutral-500'); els.statusIndicator.classList.add('text-red-500');
-        if (pathEl) pathEl.setAttribute('d', isVoice ? 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z' : 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
+        if (!isVoice && pathEl) pathEl.setAttribute('d', 'M6 19h4V5H6v14zm8-14v14h4V5h-4z');
     } else {
         els.micButton.classList.add('bg-neutral-800', 'hover:bg-neutral-700');
         els.micButton.classList.remove('bg-red-600', 'hover:bg-red-700', 'animate-pulse');
         els.micIcon.classList.remove('text-white');
         els.statusIndicator.textContent = isVoice ? "Tap mic to start" : "Tap play to start";
         els.statusIndicator.classList.add('text-neutral-500'); els.statusIndicator.classList.remove('text-red-500');
-        if (pathEl) pathEl.setAttribute('d', isVoice ? 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 116 0v6a3 3 0 01-3 3z' : 'M8 5v14l11-7z');
+        if (!isVoice && pathEl) pathEl.setAttribute('d', 'M8 5v14l11-7z');
     }
 }
 
