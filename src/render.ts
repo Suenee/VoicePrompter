@@ -3,8 +3,19 @@ import { state } from './state';
 import { HistoryItem } from './types';
 import { remoteEventHooks } from './remote-event-hooks';
 
+interface MarkerRange {
+    start: number;
+    end: number;
+    marker: string;
+}
+
+let markerRanges: MarkerRange[] = [];
+let lastSyncedMarkerStart: number | null = null;
+
 export function renderScript(): void {
     els.scriptContent.innerHTML = '';
+    markerRanges = [];
+    lastSyncedMarkerStart = null;
     state.scriptWords.forEach((obj, index) => {
         const span = document.createElement('span');
         span.textContent = obj.word;
@@ -32,6 +43,47 @@ export function renderScript(): void {
     setTimeout(() => scrollToCurrent(), 50);
 }
 
+function sendMarkerRange(range: MarkerRange, force = false): void {
+    if (!force && lastSyncedMarkerStart === range.start) return;
+    remoteEventHooks.HookMarker({ marker: range.marker });
+    lastSyncedMarkerStart = range.start;
+}
+
+function findMarkerForPosition(index: number): MarkerRange | null {
+    let result: MarkerRange | null = null;
+    for (const range of markerRanges) {
+        if (range.start > index) break;
+        result = range;
+    }
+    return result;
+}
+
+function syncMarkerForPosition(index = state.currentIndex): void {
+    const range = findMarkerForPosition(index);
+    if (!range) {
+        lastSyncedMarkerStart = null;
+        return;
+    }
+    sendMarkerRange(range);
+}
+
+function findFirstReadableWordAfter(index: number): number | null {
+    for (let i = index; i < state.scriptWords.length; i++) {
+        const word = state.scriptWords[i];
+        if (!word.skip && !word.isBreak && !word.isStop) return i;
+    }
+    return null;
+}
+
+function activateMarker(range: MarkerRange): void {
+    sendMarkerRange(range, true);
+    const nextReadable = findFirstReadableWordAfter(range.end + 1);
+    if (nextReadable === null) return;
+    state.currentIndex = nextReadable;
+    updateHighlight();
+    scrollToCurrent();
+}
+
 /** Turns any [ ... ] cue directive into a full-width visual separator row. */
 function wrapCueMarkers(): void {
     for (let i = 0; i < state.scriptWords.length; i++) {
@@ -45,8 +97,20 @@ function wrapCueMarkers(): void {
         if (end >= state.scriptWords.length || !state.scriptWords[end].word.includes(']')) continue;
         const firstElement = state.scriptWords[i].element;
         if (!firstElement || !firstElement.parentElement) continue;
+
+        const range: MarkerRange = {
+            start: i,
+            end,
+            marker: state.scriptWords.slice(i, end + 1).map(word => word.word).join(' ')
+        };
+        markerRanges.push(range);
+
         const row = document.createElement('div');
         row.className = 'slide-marker-row';
+        row.onclick = event => {
+            event.stopPropagation();
+            activateMarker(range);
+        };
         firstElement.parentElement.insertBefore(row, firstElement);
         for (let j = i; j <= end; j++) { const element = state.scriptWords[j].element; if (element) row.appendChild(element); }
         i = end;
@@ -60,6 +124,7 @@ export function updateHighlight(): void {
         else if (idx === state.currentIndex) { if (obj.element) { obj.element.classList.remove('text-neutral-500', 'text-future'); obj.element.classList.add('current-word'); } }
         else { if (obj.element) { obj.element.classList.remove('current-word', 'text-neutral-500'); obj.element.classList.add('text-future'); } }
     });
+    syncMarkerForPosition();
 }
 
 export function scrollToCurrent(): void {
@@ -92,6 +157,7 @@ export function advancePastSkipped(): void {
         const first = state.scriptWords[state.currentIndex];
         if (first.word.startsWith('[')) {
             const markerWords: string[] = [];
+            const markerStart = state.currentIndex;
             let i = state.currentIndex;
 
             while (i < state.scriptWords.length && state.scriptWords[i].skip) {
@@ -100,7 +166,9 @@ export function advancePastSkipped(): void {
                 i++;
 
                 if (closesMarker) {
-                    remoteEventHooks.HookMarker({ marker: markerWords.join(' ') });
+                    const range = markerRanges.find(item => item.start === markerStart);
+                    if (range) sendMarkerRange(range);
+                    else remoteEventHooks.HookMarker({ marker: markerWords.join(' ') });
                     state.currentIndex = i;
                     break;
                 }
