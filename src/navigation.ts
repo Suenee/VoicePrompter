@@ -1,5 +1,5 @@
 import { state } from './state';
-import { advancePastSkipped, updateHighlight, scrollToCurrent } from './render';
+import { advancePastSkipped, updateHighlight, scrollToCurrent, restartScript, navigateParagraphs } from './render';
 
 function applyTarget(target: number): void {
     if (state.scriptWords.length === 0) return;
@@ -7,6 +7,14 @@ function applyTarget(target: number): void {
     advancePastSkipped();
     updateHighlight();
     scrollToCurrent();
+}
+
+export function goStart(): void {
+    restartScript();
+}
+
+export function goPreviousParagraph(): void {
+    navigateParagraphs('back', 1);
 }
 
 /** Jump to the first readable word of the paragraph containing currentIndex. */
@@ -59,4 +67,13 @@ export function goPreviousCue(): void {
     }
 
     if (previousCue >= 0) applyTarget(cueEnd(previousCue) + 1);
+}
+
+export function goNextParagraph(): void {
+    navigateParagraphs('forward', 1);
+}
+
+export function goFinish(): void {
+    if (state.scriptWords.length === 0) return;
+    applyTarget(state.scriptWords.length - 1);
 }
