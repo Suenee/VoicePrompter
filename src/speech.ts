@@ -8,6 +8,7 @@ let speechBlocked = false;
 let commandArmed = true;
 let isFirstStart = true;
 let gotResultOnFirstStart = false;
+const voiceDebugEnabled = new URLSearchParams(window.location.search).get('debug') === 'voice';
 
 function showBrowserWarning() { els.browserWarning.classList.remove('hidden'); }
 
@@ -26,12 +27,19 @@ export function initSpeech(): void {
         for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0].transcript;
 
         if (state.config.voiceCommandsEnabled) {
-            const cleanTokens = transcript.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(t => t.length > 0);
+            const normalizedTranscript = transcript.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+            const cleanTokens = normalizedTranscript.split(/\s+/).filter(t => t.length > 0);
             const commands = ['cue back', 'cue next', 'go current', 'go start', 'go finish', 'go next', 'go back'];
             const commandMatched = commands.find(command => {
                 const tokens = command.split(' ');
                 return cleanTokens.length >= tokens.length && cleanTokens.slice(-tokens.length).join(' ') === command;
             }) || null;
+
+            if (voiceDebugEnabled) {
+                console.log(`[VoiceDebug] Heard: "${transcript.trim()}"`);
+                console.log(`[VoiceDebug] Normalized: "${normalizedTranscript}"`);
+                console.log(`[VoiceDebug] Command: ${commandMatched || 'none'}`);
+            }
 
             if (commandMatched) {
                 const commandTokens = commandMatched.split(' ');
@@ -42,6 +50,8 @@ export function initSpeech(): void {
                 for (let j = 0; j <= windowScript.length - commandTokens.length; j++) {
                     if (commandTokens.every((token, offset) => windowScript[j + offset] === token)) { conflict = true; break; }
                 }
+
+                if (voiceDebugEnabled) console.log(`[VoiceDebug] Armed: ${commandArmed}, conflict: ${conflict}`);
 
                 if (!conflict && commandArmed) {
                     commandArmed = false;
