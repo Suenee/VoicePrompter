@@ -1,15 +1,6 @@
-import {
-    goStart as navigateGoStart,
-    goPreviousParagraph,
-    goCurrentParagraph,
-    goNextParagraph,
-    goPreviousCue,
-    goNextCue,
-    goFinish as navigateGoFinish
-} from './navigation';
-
 type JsonObject = Record<string, unknown>;
 type Sender = (message: JsonObject) => void;
+type PublicHandler = (args: JsonObject) => Promise<void>;
 
 type PublicMethod =
     | 'goStart'
@@ -34,7 +25,7 @@ interface CallMessage extends JsonObject {
 export class RemoteCommandHandler {
     private sender: Sender | null = null;
 
-    private readonly publicMethods: Record<PublicMethod, (args: JsonObject) => void> = {
+    private readonly publicMethods: Record<PublicMethod, PublicHandler> = {
         goStart: args => this.goStart(args),
         markerBack: args => this.markerBack(args),
         goBack: args => this.goBack(args),
@@ -62,7 +53,6 @@ export class RemoteCommandHandler {
             }
             message = parsed as JsonObject;
         } catch {
-            // VPBridge should already reject this at transport level. Keep the receiver defensive.
             console.warn('[VPP] DROPPED - INVALID JSON:', text);
             return;
         }
@@ -89,7 +79,7 @@ export class RemoteCommandHandler {
                 this.rejectInvalidMessage(message, callError);
                 return;
             }
-            this.handleCall(message as CallMessage);
+            void this.handleCall(message as CallMessage);
             return;
         }
 
@@ -97,62 +87,46 @@ export class RemoteCommandHandler {
     }
 
     private validateEnvelope(message: JsonObject): string | null {
-        if (typeof message.protocolVersion !== 'number' || !Number.isInteger(message.protocolVersion)) {
-            return 'protocolVersion must be an integer';
-        }
-        if (typeof message.id !== 'string' || message.id.trim() === '') {
-            return 'id must be a non-empty string';
-        }
-        if (typeof message.type !== 'string' || !this.messageTypes.has(message.type as MessageType)) {
-            return 'type must be one of: call, event, progress, response, error';
-        }
-        if (message.source !== undefined && (!message.source || typeof message.source !== 'object' || Array.isArray(message.source))) {
-            return 'source must be an object when present';
-        }
-        if (message.timestamp !== undefined && (typeof message.timestamp !== 'string' || message.timestamp.trim() === '')) {
-            return 'timestamp must be a non-empty string when present';
-        }
-        if (message.correlationId !== undefined && (typeof message.correlationId !== 'string' || message.correlationId.trim() === '')) {
-            return 'correlationId must be a non-empty string when present';
-        }
+        if (typeof message.protocolVersion !== 'number' || !Number.isInteger(message.protocolVersion)) return 'protocolVersion must be an integer';
+        if (typeof message.id !== 'string' || message.id.trim() === '') return 'id must be a non-empty string';
+        if (typeof message.type !== 'string' || !this.messageTypes.has(message.type as MessageType)) return 'type must be one of: call, event, progress, response, error';
+        if (message.source !== undefined && (!message.source || typeof message.source !== 'object' || Array.isArray(message.source))) return 'source must be an object when present';
+        if (message.timestamp !== undefined && (typeof message.timestamp !== 'string' || message.timestamp.trim() === '')) return 'timestamp must be a non-empty string when present';
+        if (message.correlationId !== undefined && (typeof message.correlationId !== 'string' || message.correlationId.trim() === '')) return 'correlationId must be a non-empty string when present';
         return null;
     }
 
     private validateCall(message: JsonObject): string | null {
-        if (typeof message.method !== 'string' || message.method.trim() === '') {
-            return 'call.method must be a non-empty string';
-        }
-        if (!message.args || typeof message.args !== 'object' || Array.isArray(message.args)) {
-            return 'call.args must be a JSON object';
-        }
-        if (message.expectsResponse !== undefined && typeof message.expectsResponse !== 'boolean') {
-            return 'call.expectsResponse must be boolean when present';
+        if (typeof message.method !== 'string' || message.method.trim() === '') return 'call.method must be a non-empty string';
+        if (!message.args || typeof message.args !== 'object' || Array.isArray(message.args)) return 'call.args must be a JSON object';
+        if (message.expectsResponse !== undefined && typeof message.expectsResponse !== 'boolean') return 'call.expectsResponse must be boolean when present';
+
+        const args = message.args as JsonObject;
+        if (args.offset !== undefined && (typeof args.offset !== 'number' || !Number.isFinite(args.offset) || !Number.isInteger(args.offset))) {
+            return 'call.args.offset must be a finite integer when present';
         }
         return null;
     }
 
     private rejectInvalidMessage(message: JsonObject, reason: string): void {
         console.warn(`[VPP] DROPPED - INVALID VPP MESSAGE: ${reason}`, message);
-
         if (typeof message.id === 'string' && message.id.trim() !== '') {
             this.sendError(message, 'INVALID_MESSAGE', 'Message does not conform to VoicePrompter Protocol', { reason });
         }
     }
 
-    private handleCall(call: CallMessage): void {
+    private async handleCall(call: CallMessage): Promise<void> {
         const method = call.method as PublicMethod;
         const handler = this.publicMethods[method];
 
         if (!handler) {
             console.warn(`[VPP] Method not allowed or unknown: ${String(call.method)}`);
-            this.sendError(call, 'METHOD_NOT_FOUND', 'Requested method does not exist or is not public', {
-                method: call.method
-            });
+            this.sendError(call, 'METHOD_NOT_FOUND', 'Requested method does not exist or is not public', { method: call.method });
             return;
         }
 
         try {
-            handler(call.args);
+            await handler(call.args);
             if (call.expectsResponse) {
                 this.send({
                     protocolVersion: 1,
@@ -179,11 +153,7 @@ export class RemoteCommandHandler {
             id: crypto.randomUUID(),
             ...(typeof original.id === 'string' ? { correlationId: original.id } : {}),
             type: 'error',
-            error: {
-                code,
-                message,
-                ...(details ? { details } : {})
-            },
+            error: { code, message, ...(details ? { details } : {}) },
             source: { app: 'VoicePrompter', version: 'devel' },
             timestamp: new Date().toISOString()
         });
@@ -197,39 +167,64 @@ export class RemoteCommandHandler {
         this.sender(message);
     }
 
-    public goStart(args: JsonObject): void {
+    private offset(args: JsonObject, defaultDirection: 1 | -1): { direction: 1 | -1; count: number } {
+        const raw = args.offset;
+        if (raw === undefined) return { direction: defaultDirection, count: 1 };
+        const value = raw as number;
+        if (value === 0) return { direction: defaultDirection, count: 0 };
+        return { direction: value < 0 ? -1 : 1, count: Math.abs(value) };
+    }
+
+    public async goStart(args: JsonObject): Promise<void> {
         console.log('[VPP] goStart()', args);
-        navigateGoStart();
+        const { goStart } = await import('./navigation');
+        goStart();
     }
 
-    public markerBack(args: JsonObject): void {
+    public async markerBack(args: JsonObject): Promise<void> {
         console.log('[VPP] markerBack()', args);
-        goPreviousCue();
+        const { direction, count } = this.offset(args, -1);
+        if (count === 0) return;
+        const navigation = await import('./navigation');
+        const step = direction < 0 ? navigation.goPreviousCue : navigation.goNextCue;
+        for (let i = 0; i < count; i++) step();
     }
 
-    public goBack(args: JsonObject): void {
+    public async goBack(args: JsonObject): Promise<void> {
         console.log('[VPP] goBack()', args);
-        goPreviousParagraph();
+        const { direction, count } = this.offset(args, -1);
+        if (count === 0) return;
+        const { navigateParagraphs } = await import('./render');
+        navigateParagraphs(direction < 0 ? 'back' : 'forward', count);
     }
 
-    public goCurrent(args: JsonObject): void {
+    public async goCurrent(args: JsonObject): Promise<void> {
         console.log('[VPP] goCurrent()', args);
+        const { goCurrentParagraph } = await import('./navigation');
         goCurrentParagraph();
     }
 
-    public goNext(args: JsonObject): void {
+    public async goNext(args: JsonObject): Promise<void> {
         console.log('[VPP] goNext()', args);
-        goNextParagraph();
+        const { direction, count } = this.offset(args, 1);
+        if (count === 0) return;
+        const { navigateParagraphs } = await import('./render');
+        navigateParagraphs(direction < 0 ? 'back' : 'forward', count);
     }
 
-    public markerNext(args: JsonObject): void {
+    public async markerNext(args: JsonObject): Promise<void> {
         console.log('[VPP] markerNext()', args);
-        goNextCue();
+        const { direction, count } = this.offset(args, 1);
+        if (count === 0) return;
+        const navigation = await import('./navigation');
+        const step = direction < 0 ? navigation.goPreviousCue : navigation.goNextCue;
+        for (let i = 0; i < count; i++) step();
     }
 
-    public goFinish(args: JsonObject): void {
+    public async goFinish(args: JsonObject): Promise<void> {
         console.log('[VPP] goFinish()', args);
-        navigateGoFinish();
+        const { goFinish } = await import('./navigation');
+        goFinish();
     }
 }
 
