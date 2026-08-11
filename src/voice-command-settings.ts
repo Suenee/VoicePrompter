@@ -14,18 +14,31 @@ export type VoiceCommandPhrases = Record<VoiceCommandAction, string>;
 const STORAGE_KEY = 'voiceCommandPhrases';
 
 export const DEFAULT_VOICE_COMMAND_PHRASES: VoiceCommandPhrases = {
-    goStart: 'go start', cueBack: 'cue back', goBack: 'go back', goCurrent: 'go current', goNext: 'go next', cueNext: 'cue next', goFinish: 'go finish'
+    goStart: 'go start', cueBack: 'marker back', goBack: 'go back', goCurrent: 'go current', goNext: 'go next', cueNext: 'marker next', goFinish: 'go finish'
 };
 
 const LABELS: Record<VoiceCommandAction, string> = {
-    goStart: 'Go Start', cueBack: 'Cue Back', goBack: 'Go Back', goCurrent: 'Go Current', goNext: 'Go Next', cueNext: 'Cue Next', goFinish: 'Go Finish'
+    goStart: 'Go Start', cueBack: 'Marker Back', goBack: 'Go Back', goCurrent: 'Go Current', goNext: 'Go Next', cueNext: 'Marker Next', goFinish: 'Go Finish'
 };
 const ICONS: Record<VoiceCommandAction, string> = {
     goStart: '|<', cueBack: '[<', goBack: '<<', goCurrent: '<|', goNext: '>>', cueNext: '>]', goFinish: '>|'
 };
+const TOOLTIPS: Record<VoiceCommandAction, string> = {
+    goStart: 'Go to the beginning of the script.',
+    cueBack: 'Go to the previous marker in square brackets.',
+    goBack: 'Go to the previous paragraph.',
+    goCurrent: 'Go to the beginning of the current paragraph.',
+    goNext: 'Go to the next paragraph.',
+    cueNext: 'Go to the next marker in square brackets.',
+    goFinish: 'Go to the end of the script.'
+};
 const ACTIONS = Object.keys(DEFAULT_VOICE_COMMAND_PHRASES) as VoiceCommandAction[];
 
-let currentPhrases: VoiceCommandPhrases = { ...DEFAULT_VOICE_COMMAND_PHRASES, ...loadSetting<Partial<VoiceCommandPhrases>>(STORAGE_KEY, {}) };
+const storedPhrases = loadSetting<Partial<VoiceCommandPhrases>>(STORAGE_KEY, {});
+if (storedPhrases.cueBack === 'cue back') storedPhrases.cueBack = 'marker back';
+if (storedPhrases.cueNext === 'cue next') storedPhrases.cueNext = 'marker next';
+let currentPhrases: VoiceCommandPhrases = { ...DEFAULT_VOICE_COMMAND_PHRASES, ...storedPhrases };
+
 export function getVoiceCommandPhrases(): VoiceCommandPhrases { return currentPhrases; }
 export function getVoiceCommandAliases(): Array<{ action: VoiceCommandAction; phrase: string }> {
     const aliases: Array<{ action: VoiceCommandAction; phrase: string }> = [];
@@ -50,7 +63,7 @@ function createModal(): HTMLElement {
     modal.id = 'voiceCommandsModal';
     modal.className = 'hidden fixed inset-0 z-[10003] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4';
     const rows = ACTIONS.map(action => `
-        <div class="grid grid-cols-[34px_96px_1fr] gap-2 items-center">
+        <div class="grid grid-cols-[34px_96px_1fr] gap-2 items-center" title="${TOOLTIPS[action]}">
             <span class="h-8 min-w-8 px-1 flex items-center justify-center rounded bg-neutral-800 border border-neutral-700 font-mono text-xs text-neutral-300">${ICONS[action].replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
             <label for="voicePhrase-${action}" class="text-xs text-neutral-300">${LABELS[action]}</label>
             <input id="voicePhrase-${action}" data-voice-action="${action}" type="text" autocomplete="off" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white focus:ring-2 focus:ring-[#FFBB00] focus:border-transparent outline-none" placeholder="${DEFAULT_VOICE_COMMAND_PHRASES[action]}">
