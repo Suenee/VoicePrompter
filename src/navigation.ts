@@ -92,6 +92,44 @@ function applyConfiguredDockOpacity(): void {
     dock.style.opacity = (state.config.dockOpacity / 100).toString();
 }
 
+function updateNavigationVisibility(): void {
+    const group = document.getElementById('navigationControlsGroup');
+    if (!group) return;
+    group.classList.toggle('hidden', !state.config.navigationControlsEnabled);
+}
+
+function createNavigationSettingsToggle(): void {
+    if (document.getElementById('navigationControlsToggle')) return;
+
+    const settingsPanel = document.getElementById('settingsPanel');
+    const highlightToggle = document.getElementById('highlightActiveWordToggle');
+    const highlightRow = highlightToggle?.closest('.flex.items-center.justify-between');
+    if (!settingsPanel || !highlightRow) return;
+
+    const row = document.createElement('div');
+    row.id = 'navigationControlsSettingsRow';
+    row.className = 'flex items-center justify-between';
+    row.innerHTML = `
+        <div class="flex flex-col min-w-0 pr-3">
+            <span class="text-sm text-neutral-300">Navigation Controls</span>
+            <span class="text-xs text-neutral-500">Show navigation buttons</span>
+        </div>
+        <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+            <input id="navigationControlsToggle" type="checkbox" class="sr-only peer">
+            <div class="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFBB00]"></div>
+        </label>`;
+
+    const remoteRow = document.getElementById('remoteControlSettingsRow');
+    (remoteRow || highlightRow).insertAdjacentElement('afterend', row);
+
+    const toggle = document.getElementById('navigationControlsToggle') as HTMLInputElement;
+    toggle.checked = state.config.navigationControlsEnabled;
+    toggle.addEventListener('change', () => {
+        state.config.navigationControlsEnabled = toggle.checked;
+        updateNavigationVisibility();
+    });
+}
+
 function initNavigationControls(): void {
     if (document.getElementById('navigationControlsGroup')) return;
     const mainDock = document.getElementById('mainControlsDock');
@@ -102,13 +140,11 @@ function initNavigationControls(): void {
     group.className = 'pointer-events-auto flex items-center gap-1 px-2 py-1.5 rounded-lg bg-neutral-900/80 backdrop-blur border border-neutral-700/70 shadow-lg font-mono text-sm text-neutral-300 flex-shrink-0';
     group.innerHTML = `
         <button data-nav="start" title="Go Start" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">|&lt;</button>
-        <button data-nav="previous-paragraph" title="Previous Paragraph" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&lt;&lt;</button>
-        <button data-nav="current-paragraph" title="Current Paragraph Start" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&lt;|</button>
-        <span class="w-px h-5 bg-neutral-700 mx-0.5"></span>
-        <button data-nav="previous-cue" title="Previous Cue" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">[&lt;</button>
-        <button data-nav="next-cue" title="Next Cue" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">&gt;]</button>
-        <span class="w-px h-5 bg-neutral-700 mx-0.5"></span>
-        <button data-nav="next-paragraph" title="Next Paragraph" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;&gt;</button>
+        <button data-nav="previous-cue" title="Cue Back" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">[&lt;</button>
+        <button data-nav="previous-paragraph" title="Go Back" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&lt;&lt;</button>
+        <button data-nav="current-paragraph" title="Go Current" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&lt;|</button>
+        <button data-nav="next-paragraph" title="Go Next" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;&gt;</button>
+        <button data-nav="next-cue" title="Cue Next" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">&gt;]</button>
         <button data-nav="finish" title="Go Finish" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;|</button>`;
 
     // Navigation belongs to the right side of the main dock so it cannot be
@@ -119,11 +155,11 @@ function initNavigationControls(): void {
 
     const actions: Record<string, () => void> = {
         start: goStart,
+        'previous-cue': goPreviousCue,
         'previous-paragraph': goPreviousParagraph,
         'current-paragraph': goCurrentParagraph,
-        'previous-cue': goPreviousCue,
-        'next-cue': goNextCue,
         'next-paragraph': goNextParagraph,
+        'next-cue': goNextCue,
         finish: goFinish
     };
 
@@ -131,6 +167,9 @@ function initNavigationControls(): void {
         button.type = 'button';
         button.addEventListener('click', () => actions[button.dataset.nav || '']?.());
     });
+
+    createNavigationSettingsToggle();
+    updateNavigationVisibility();
 
     // Recording Dock Opacity is a dock appearance setting. Apply it immediately,
     // not only while listening/recording, so the slider always has a live and
