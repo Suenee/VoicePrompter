@@ -1,4 +1,3 @@
-import './remote-control';
 import { AppConfig, AppState } from './types';
 import { DEFAULT_APP_CONFIG, DEFAULT_USER_SETTINGS } from './default-settings';
 import { loadSetting, resetSettings, saveSetting } from './storage';
@@ -39,6 +38,12 @@ export const state = new Proxy(initialState, {
         return true;
     }
 });
+
+// Remote Control is intentionally loaded only after the state object exists.
+// A static import here creates a cycle through the VPP/navigation modules and
+// can delay main.ts evaluation until after DOMContentLoaded. In that case the
+// synchronous boot path touches main.ts lexical state before it is initialized.
+void import('./remote-control');
 
 window.addEventListener('DOMContentLoaded', () => {
     const setCheckbox = (id: string, checked: boolean) => {
