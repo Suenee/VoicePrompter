@@ -38,6 +38,8 @@ export function renderScript(): void {
         obj.element = span;
     });
 
+    wrapSlideMarkers();
+
     // Apply current visibility setting
     if (state.config.showStopIcon) {
         els.scriptContent.classList.add('show-stops');
@@ -62,6 +64,40 @@ export function renderScript(): void {
     setTimeout(() => {
         scrollToCurrent();
     }, 50);
+}
+
+/**
+ * Turns [SLIDE n] directives into full-width visual separator rows.
+ * The words remain the same skipped script tokens, so speech matching behaviour
+ * is untouched; only their DOM presentation changes.
+ */
+function wrapSlideMarkers(): void {
+    for (let i = 0; i < state.scriptWords.length; i++) {
+        const first = state.scriptWords[i];
+        if (!/^\[SLIDE(?:\s|$)/i.test(first.word)) continue;
+
+        let end = i;
+        while (end < state.scriptWords.length && !state.scriptWords[end].word.includes(']')) {
+            if (state.scriptWords[end].isBreak || state.scriptWords[end].isStop) break;
+            end++;
+        }
+
+        if (end >= state.scriptWords.length || !state.scriptWords[end].word.includes(']')) continue;
+
+        const firstElement = state.scriptWords[i].element;
+        if (!firstElement || !firstElement.parentElement) continue;
+
+        const row = document.createElement('div');
+        row.className = 'slide-marker-row';
+        firstElement.parentElement.insertBefore(row, firstElement);
+
+        for (let j = i; j <= end; j++) {
+            const element = state.scriptWords[j].element;
+            if (element) row.appendChild(element);
+        }
+
+        i = end;
+    }
 }
 
 export function updateHighlight(): void {
@@ -222,6 +258,19 @@ export function applySettings(): void {
     els.appBody.style.color = state.config.textColor;
     els.appBody.style.setProperty('--base-color', state.config.textColor);
 
+    // Keep slide separators subtle on both dark and light/custom backgrounds.
+    const hex = state.config.bgColor.replace('#', '');
+    if (/^[0-9a-f]{6}$/i.test(hex)) {
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+        els.scriptContent.style.setProperty(
+            '--slide-marker-bg',
+            luminance > 0.55 ? 'rgba(0, 0, 0, 0.06)' : 'rgba(255, 255, 255, 0.06)'
+        );
+    }
+
     // Apply background to prompter container for theme support
     els.prompterContainer.style.backgroundColor = state.config.bgColor;
     if (!(state.isVideoMode && state.videoLayoutMode === 'overlay')) {
@@ -289,7 +338,7 @@ export function updateMicUI(isListening: boolean): void {
         
         if (pathEl) {
             if (isVoice) {
-                pathEl.setAttribute('d', 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z');
+                pathEl.setAttribute('d', 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 116 0v6a3 3 0 01-3 3z');
             } else {
                 // Play icon
                 pathEl.setAttribute('d', 'M8 5v14l11-7z');
