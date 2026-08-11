@@ -209,8 +209,16 @@ export class RemoteCommandHandler {
 
     public async goCurrent(args: JsonObject): Promise<void> {
         console.log('[VPP] goCurrent()', args);
+        const count = Math.abs(this.offset(args));
+        if (count === 0) return;
+
         const { goCurrentParagraph } = await import('./navigation');
         goCurrentParagraph();
+
+        if (count > 1) {
+            const { navigateParagraphs } = await import('./render');
+            navigateParagraphs('back', count - 1);
+        }
     }
 
     public async goNext(args: JsonObject): Promise<void> {
