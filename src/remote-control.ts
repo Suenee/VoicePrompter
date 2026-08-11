@@ -145,12 +145,12 @@ function createSettingsRow(): HTMLElement | null {
             <span class="text-xs text-neutral-500">Connect to WebSocket</span>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
+            <button id="remoteControlSettingsBtn" type="button" title="VPBridge connection settings"
+                class="h-8 min-w-9 px-2 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-xs font-bold text-neutral-300 hover:text-white transition-colors">&gt;&gt;</button>
             <label class="relative inline-flex items-center cursor-pointer">
                 <input id="remoteControlToggle" type="checkbox" class="sr-only peer">
                 <div class="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFBB00]"></div>
             </label>
-            <button id="remoteControlSettingsBtn" type="button" title="VPBridge connection settings"
-                class="h-8 min-w-9 px-2 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-xs font-bold text-neutral-300 hover:text-white transition-colors">&gt;&gt;</button>
         </div>
     `;
 
