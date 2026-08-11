@@ -109,10 +109,10 @@ window.addEventListener('DOMContentLoaded', () => {
         resetSection.className = 'mt-6 pt-4 border-t border-neutral-800';
         resetSection.innerHTML = `
             <button id="resetSettingsDefaultsBtn" type="button"
+                title="Restores application settings only. Script history is preserved."
                 class="w-full px-4 py-3 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-neutral-300 hover:text-white transition-colors border border-neutral-700">
                 Reset Settings to Defaults
             </button>
-            <p class="text-[10px] text-neutral-500 mt-2 leading-normal text-center">Restores application settings only. Script history is preserved.</p>
         `;
         settingsPanel.appendChild(resetSection);
 
