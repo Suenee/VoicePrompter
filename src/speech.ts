@@ -27,9 +27,19 @@ export function initSpeech(): void {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { showBrowserWarning(); return; }
     state.recognition = new SpeechRecognition(); state.recognition.continuous = true; state.recognition.interimResults = true; state.recognition.lang = state.selectedLanguage;
+    if (voiceDebugEnabled) {
+        state.recognition.onstart = () => console.log(`[VoiceDebug] onstart lang=${state.recognition.lang}`);
+        state.recognition.onaudiostart = () => console.log('[VoiceDebug] onaudiostart');
+        state.recognition.onsoundstart = () => console.log('[VoiceDebug] onsoundstart');
+        state.recognition.onspeechstart = () => console.log('[VoiceDebug] onspeechstart');
+        state.recognition.onspeechend = () => console.log('[VoiceDebug] onspeechend');
+        state.recognition.onsoundend = () => console.log('[VoiceDebug] onsoundend');
+        state.recognition.onaudioend = () => console.log('[VoiceDebug] onaudioend');
+    }
     state.recognition.onresult = (event: any) => {
         if (isFirstStart) gotResultOnFirstStart = true;
         let transcript = ''; for (let i = event.resultIndex; i < event.results.length; i++) transcript += event.results[i][0].transcript;
+        if (voiceDebugEnabled) console.log(`[VoiceDebug] onresult raw="${transcript.trim()}"`);
         const normalizedTranscript = normalizeCommandText(transcript);
         const cleanTokens = normalizedTranscript.split(/\s+/).filter(t => t.length > 0);
         const aliases = getVoiceCommandAliases();
@@ -52,14 +62,15 @@ export function initSpeech(): void {
     };
     state.recognition.onerror = (e: any) => {
         console.log('error:', e.error, e.message);
+        if (voiceDebugEnabled) console.log(`[VoiceDebug] onerror error=${e.error} message=${e.message || ''} lang=${state.recognition?.lang || ''}`);
         if (e.error === 'no-speech') { isFirstStart = false; if (voiceDebugEnabled) console.log('[VoiceDebug] no-speech: keeping listening active; recognition will restart on end'); return; }
         if (isFirstStart && !gotResultOnFirstStart) { isFirstStart = false; state.isListening = false; updateMicUI(false); }
         if (e.error === 'aborted') { speechBlocked = true; const isIPad = navigator.userAgent.includes('iPad') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 2); const isPWA = (window.navigator as any).standalone === true || window.matchMedia('(display-mode: standalone)').matches; if (isIPad && isPWA) els.ipadPwaWarning.classList.remove('hidden'); state.isListening = false; updateMicUI(false); return; }
         if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture' || e.error === 'network' || e.error === 'language-not-supported') { state.isListening = false; updateMicUI(false); }
     };
-    state.recognition.onend = () => { console.log('ended'); if (isFirstStart && !gotResultOnFirstStart) { isFirstStart = false; state.isListening = false; updateMicUI(false); return; } isFirstStart = false; if (speechBlocked) return; if (state.isListening) { try { state.recognition.start(); } catch (error) { console.error('Failed to restart speech recognition:', error); } } else updateMicUI(false); };
+    state.recognition.onend = () => { console.log('ended'); if (voiceDebugEnabled) console.log(`[VoiceDebug] onend isListening=${state.isListening} speechBlocked=${speechBlocked}`); if (isFirstStart && !gotResultOnFirstStart) { isFirstStart = false; state.isListening = false; updateMicUI(false); return; } isFirstStart = false; if (speechBlocked) return; if (state.isListening) { try { state.recognition.start(); } catch (error) { console.error('Failed to restart speech recognition:', error); } } else updateMicUI(false); };
 }
-export function startListening(): void { if (!state.recognition) return; state.isListening = true; lastMatchedWord = ''; speechBlocked = false; try { state.recognition.start(); updateMicUI(true); } catch (error) { console.error('Failed to start speech recognition:', error); state.isListening = false; updateMicUI(false); } }
+export function startListening(): void { if (!state.recognition) return; state.isListening = true; lastMatchedWord = ''; speechBlocked = false; if (voiceDebugEnabled) console.log(`[VoiceDebug] startListening lang=${state.recognition.lang} selectedLanguage=${state.selectedLanguage}`); try { state.recognition.start(); updateMicUI(true); } catch (error) { console.error('Failed to start speech recognition:', error); state.isListening = false; updateMicUI(false); } }
 export function stopListening(): void { if (!state.recognition) return; state.isListening = false; lastMatchedWord = ''; try { state.recognition.stop(); updateMicUI(false); } catch (error) { console.error('Failed to stop speech recognition:', error); } }
 function matchWords(spokenWords: string[]) {
     if (state.currentIndex >= state.scriptWords.length || spokenWords.length === 0) return;
