@@ -101,10 +101,9 @@ function updateNavigationVisibility(): void {
 function createNavigationSettingsToggle(): void {
     if (document.getElementById('navigationControlsToggle')) return;
 
-    const settingsPanel = document.getElementById('settingsPanel');
-    const highlightToggle = document.getElementById('highlightActiveWordToggle');
-    const highlightRow = highlightToggle?.closest('.flex.items-center.justify-between');
-    if (!settingsPanel || !highlightRow) return;
+    const voiceToggle = document.getElementById('voiceCommandToggle');
+    const voiceRow = voiceToggle?.closest('.flex.items-center.justify-between');
+    if (!voiceRow) return;
 
     const row = document.createElement('div');
     row.id = 'navigationControlsSettingsRow';
@@ -119,8 +118,7 @@ function createNavigationSettingsToggle(): void {
             <div class="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFBB00]"></div>
         </label>`;
 
-    const remoteRow = document.getElementById('remoteControlSettingsRow');
-    (remoteRow || highlightRow).insertAdjacentElement('afterend', row);
+    voiceRow.insertAdjacentElement('afterend', row);
 
     const toggle = document.getElementById('navigationControlsToggle') as HTMLInputElement;
     toggle.checked = state.config.navigationControlsEnabled;
@@ -147,8 +145,6 @@ function initNavigationControls(): void {
         <button data-nav="next-cue" title="Cue Next" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-[#FFBB00] transition-colors">&gt;]</button>
         <button data-nav="finish" title="Go Finish" class="min-w-8 h-8 px-1.5 rounded hover:bg-neutral-700 hover:text-white transition-colors">&gt;|</button>`;
 
-    // Navigation belongs to the right side of the main dock so it cannot be
-    // visually confused with the Back-to-Editor button on the far left.
     mainDock.appendChild(group);
     mainDock.classList.remove('gap-6');
     mainDock.classList.add('gap-3', 'px-3', 'flex-wrap');
@@ -171,18 +167,11 @@ function initNavigationControls(): void {
     createNavigationSettingsToggle();
     updateNavigationVisibility();
 
-    // Recording Dock Opacity is a dock appearance setting. Apply it immediately,
-    // not only while listening/recording, so the slider always has a live and
-    // predictable effect. This also keeps dynamically added navigation controls
-    // at exactly the same opacity as the original controls.
     const opacityInput = document.getElementById('dockOpacityInput') as HTMLInputElement | null;
     opacityInput?.addEventListener('input', () => {
         requestAnimationFrame(applyConfiguredDockOpacity);
     });
 
-    // Existing voice/video handlers may restore inline opacity after stopping.
-    // Re-apply the configured value after those handlers finish so the setting is
-    // never silently overridden.
     ['micButton', 'videoRecordBtn', 'videoStopBtn', 'videoModeBtn'].forEach(id => {
         document.getElementById(id)?.addEventListener('click', () => {
             window.setTimeout(applyConfiguredDockOpacity, 0);
