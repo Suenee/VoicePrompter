@@ -3,39 +3,70 @@ import { VitePWA } from 'vite-plugin-pwa'
 import fs from 'fs'
 import path from 'path'
 
-// Blog pages are fully generated static HTML. Processing them again as Vite
-// HTML entrypoints is unnecessary and can trigger Vite's html-proxy inline-CSS
-// path handling on Windows. Copy the generated HTML files to dist unchanged.
-function copyGeneratedBlogHtml() {
-    return {
-        name: 'copy-generated-blog-html',
-        closeBundle() {
-            const blogDir = path.resolve(__dirname, 'blog');
-            const distBlogDir = path.resolve(__dirname, 'dist/blog');
-            if (!fs.existsSync(blogDir)) return;
+const staticHtmlFiles = [
+    'index.html',
+    'about.html',
+    'privacy.html',
+    'terms.html',
+    'changelog.html'
+]
 
-            fs.mkdirSync(distBlogDir, { recursive: true });
-            for (const file of fs.readdirSync(blogDir)) {
-                if (!file.endsWith('.html')) continue;
-                fs.copyFileSync(path.join(blogDir, file), path.join(distBlogDir, file));
+const staticDirectories = [
+    'blog',
+    'mac',
+    'ios',
+    'ipad',
+    'android',
+    'web'
+]
+
+function copyDirectory(source: string, target: string): void {
+    if (!fs.existsSync(source)) return
+    fs.mkdirSync(target, { recursive: true })
+
+    for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+        const sourcePath = path.join(source, entry.name)
+        const targetPath = path.join(target, entry.name)
+
+        if (entry.isDirectory()) {
+            copyDirectory(sourcePath, targetPath)
+            continue
+        }
+
+        // Markdown files are build sources for the generated blog and are not
+        // part of the deployed static site.
+        if (entry.name.toLowerCase().endsWith('.md')) continue
+        fs.copyFileSync(sourcePath, targetPath)
+    }
+}
+
+// The marketing/site pages are already complete static HTML and contain large
+// inline style blocks. Re-processing them as Vite HTML entrypoints is both
+// unnecessary and can trigger html-proxy inline-CSS failures on Windows.
+// Build only the actual VoicePrompter app and copy the static site unchanged.
+function copyStaticSite() {
+    return {
+        name: 'copy-static-site',
+        closeBundle() {
+            const root = __dirname
+            const dist = path.resolve(root, 'dist')
+
+            fs.mkdirSync(dist, { recursive: true })
+
+            for (const file of staticHtmlFiles) {
+                const source = path.resolve(root, file)
+                if (fs.existsSync(source)) fs.copyFileSync(source, path.resolve(dist, file))
+            }
+
+            for (const directory of staticDirectories) {
+                copyDirectory(path.resolve(root, directory), path.resolve(dist, directory))
             }
         }
     }
 }
 
-// Dynamically gather all generated use-case HTML files
-const macDir = path.resolve(__dirname, 'mac');
-const useCaseInputs: Record<string, string> = {};
-if (fs.existsSync(macDir)) {
-    const folders = fs.readdirSync(macDir).filter(f => fs.statSync(path.join(macDir, f)).isDirectory());
-    folders.forEach(folder => {
-        useCaseInputs[`usecase_${folder}`] = `mac/${folder}/index.html`;
-    });
-}
-
 export default defineConfig({
     appType: 'mpa',
-    // base: '/Teleprompter/', // Removed for custom domain
     plugins: [
         VitePWA({
             registerType: 'autoUpdate',
@@ -66,23 +97,12 @@ export default defineConfig({
                 ]
             }
         }),
-        copyGeneratedBlogHtml()
+        copyStaticSite()
     ],
     build: {
         rollupOptions: {
             input: {
-                hub: 'index.html',
-                app: 'app/index.html',
-                about: 'about.html',
-                privacy: 'privacy.html',
-                terms: 'terms.html',
-                changelog: 'changelog.html',
-                mac: 'mac/index.html',
-                ios: 'ios/index.html',
-                ipad: 'ipad/index.html',
-                android: 'android/index.html',
-                web: 'web/index.html',
-                ...useCaseInputs
+                app: 'app/index.html'
             }
         }
     }
