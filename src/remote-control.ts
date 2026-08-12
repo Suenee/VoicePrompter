@@ -24,18 +24,28 @@ let remoteStatus: RemoteStatus = 'disabled';
 function setRemoteStatus(status: RemoteStatus): void {
     remoteStatus = status;
     const el = document.getElementById('remoteControlStatus');
-    if (!el) return;
-    const states: Record<RemoteStatus, { icon: string; color: string; title: string }> = {
-        disabled: { icon: '○', color: '#737373', title: 'Remote Control is disabled' },
-        error: { icon: '▲', color: '#ef4444', title: 'Connection error: VPBridge is unavailable' },
-        'bridge-only': { icon: '▲', color: '#facc15', title: 'Connected to VPBridge, but Bitfocus Companion is not connected' },
-        connected: { icon: '✓', color: '#22c55e', title: 'Connected: VPBridge and Bitfocus Companion are available' }
-    };
-    const state = states[status];
-    el.textContent = state.icon;
-    el.style.color = state.color;
-    el.title = state.title;
-    el.setAttribute('aria-label', state.title);
+    if (el) {
+        const states: Record<RemoteStatus, { icon: string; color: string; title: string }> = {
+            disabled: { icon: '○', color: '#737373', title: 'Remote Control is disabled' },
+            error: { icon: '▲', color: '#ef4444', title: 'Connection error: VPBridge is unavailable' },
+            'bridge-only': { icon: '▲', color: '#facc15', title: 'Connected to VPBridge, but Bitfocus Companion is not connected' },
+            connected: { icon: '✓', color: '#22c55e', title: 'Connected: VPBridge and Bitfocus Companion are available' }
+        };
+        const state = states[status];
+        el.textContent = state.icon;
+        el.style.color = state.color;
+        el.title = state.title;
+        el.setAttribute('aria-label', state.title);
+    }
+
+    const toggleTrack = document.getElementById('remoteControlToggleTrack');
+    if (toggleTrack) {
+        toggleTrack.style.backgroundColor = status === 'connected'
+            ? '#22c55e'
+            : status === 'disabled'
+                ? '#404040'
+                : '#FFBB00';
+    }
 }
 
 function isValidIPv4(value: string): boolean {
@@ -178,7 +188,7 @@ function createSettingsRow(): HTMLElement | null {
     const highlightRow = highlightToggle?.closest('.flex.items-center.justify-between');
     if (!highlightRow?.parentElement) return null;
     const row = document.createElement('div'); row.id = 'remoteControlSettingsRow'; row.className = 'flex items-center justify-between';
-    row.innerHTML = `<div class="flex flex-col min-w-0 pr-3"><span class="text-sm text-neutral-300">Remote Control</span><span class="text-xs text-neutral-500">Connect to WebSocket</span></div><div class="flex items-center gap-2 flex-shrink-0"><button id="remoteControlSettingsBtn" type="button" title="VPBridge connection settings" class="h-8 min-w-9 px-2 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-xs font-bold text-neutral-300 hover:text-white transition-colors">&gt;&gt;</button><label class="relative inline-flex items-center cursor-pointer"><input id="remoteControlToggle" type="checkbox" class="sr-only peer"><div class="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFBB00]"></div></label></div>`;
+    row.innerHTML = `<div class="flex flex-col min-w-0 pr-3"><span class="text-sm text-neutral-300">Remote Control</span><span class="text-xs text-neutral-500">Connect to WebSocket</span></div><div class="flex items-center gap-2 flex-shrink-0"><button id="remoteControlSettingsBtn" type="button" title="VPBridge connection settings" class="h-8 min-w-9 px-2 rounded bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-xs font-bold text-neutral-300 hover:text-white transition-colors">&gt;&gt;</button><label class="relative inline-flex items-center cursor-pointer"><input id="remoteControlToggle" type="checkbox" class="sr-only peer"><div id="remoteControlToggleTrack" class="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all"></div></label></div>`;
     highlightRow.insertAdjacentElement('afterend', row); return row;
 }
 
