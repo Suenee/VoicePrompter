@@ -3,14 +3,24 @@ import { VitePWA } from 'vite-plugin-pwa'
 import fs from 'fs'
 import path from 'path'
 
-// Dynamically gather all generated blog HTML files
-const blogDir = path.resolve(__dirname, 'blog');
-const blogInputs: Record<string, string> = {};
-if (fs.existsSync(blogDir)) {
-    const blogFiles = fs.readdirSync(blogDir).filter(f => f.endsWith('.html') && f !== 'index.html');
-    blogFiles.forEach((file, index) => {
-        blogInputs[`blog_article${index + 1}`] = `blog/${file}`;
-    });
+// Blog pages are fully generated static HTML. Processing them again as Vite
+// HTML entrypoints is unnecessary and can trigger Vite's html-proxy inline-CSS
+// path handling on Windows. Copy the generated HTML files to dist unchanged.
+function copyGeneratedBlogHtml() {
+    return {
+        name: 'copy-generated-blog-html',
+        closeBundle() {
+            const blogDir = path.resolve(__dirname, 'blog');
+            const distBlogDir = path.resolve(__dirname, 'dist/blog');
+            if (!fs.existsSync(blogDir)) return;
+
+            fs.mkdirSync(distBlogDir, { recursive: true });
+            for (const file of fs.readdirSync(blogDir)) {
+                if (!file.endsWith('.html')) continue;
+                fs.copyFileSync(path.join(blogDir, file), path.join(distBlogDir, file));
+            }
+        }
+    }
 }
 
 // Dynamically gather all generated use-case HTML files
@@ -55,7 +65,8 @@ export default defineConfig({
                     }
                 ]
             }
-        })
+        }),
+        copyGeneratedBlogHtml()
     ],
     build: {
         rollupOptions: {
@@ -66,13 +77,11 @@ export default defineConfig({
                 privacy: 'privacy.html',
                 terms: 'terms.html',
                 changelog: 'changelog.html',
-                blog: 'blog/index.html',
                 mac: 'mac/index.html',
                 ios: 'ios/index.html',
                 ipad: 'ipad/index.html',
                 android: 'android/index.html',
                 web: 'web/index.html',
-                ...blogInputs,
                 ...useCaseInputs
             }
         }
