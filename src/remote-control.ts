@@ -4,11 +4,20 @@ import { remoteCommandHandler } from './remote-command-handler';
 const DEFAULT_IP = '127.0.0.1';
 const DEFAULT_PORT = 8170;
 const DEFAULT_API_KEY = '';
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30000;
+const HEARTBEAT_GRACE_MS = 5000;
 const GDOC_REMEMBER_KEY = 'voiceprompter_gdoc_remember';
 const GDOC_REMEMBER_DAYS = 7;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
+let heartbeatTimer: number | null = null;
+let heartbeatTimeoutTimer: number | null = null;
+let heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+let lastPeerActivityAt = 0;
+let pendingPingId: string | null = null;
+
+type JsonObject = Record<string, unknown>;
 
 function isValidIPv4(value: string): boolean {
     const parts = value.trim().split('.');
@@ -33,8 +42,107 @@ function getConnectionSettings() {
 function clearReconnectTimer(): void {
     if (reconnectTimer !== null) { window.clearTimeout(reconnectTimer); reconnectTimer = null; }
 }
+function clearHeartbeatTimers(): void {
+    if (heartbeatTimer !== null) { window.clearTimeout(heartbeatTimer); heartbeatTimer = null; }
+    if (heartbeatTimeoutTimer !== null) { window.clearTimeout(heartbeatTimeoutTimer); heartbeatTimeoutTimer = null; }
+}
+function resetHeartbeatSession(): void {
+    clearHeartbeatTimers();
+    heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
+    lastPeerActivityAt = 0;
+    pendingPingId = null;
+}
+function sendRaw(message: JsonObject): boolean {
+    if (socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(message));
+    return true;
+}
+function scheduleHeartbeatCheck(): void {
+    if (heartbeatTimer !== null) window.clearTimeout(heartbeatTimer);
+    const elapsed = Math.max(0, Date.now() - lastPeerActivityAt);
+    const delay = Math.max(0, heartbeatIntervalMs - elapsed);
+    heartbeatTimer = window.setTimeout(checkHeartbeat, delay);
+}
+function sendServerPing(): void {
+    if (socket?.readyState !== WebSocket.OPEN || pendingPingId) return;
+    const id = crypto.randomUUID();
+    pendingPingId = id;
+    const sent = sendRaw({
+        protocolVersion: 1,
+        id,
+        type: 'call',
+        from: 'vp',
+        recipient: 'server',
+        method: 'ping',
+        args: {},
+        expectsResponse: true,
+        source: { app: 'VoicePrompter', version: 'devel' },
+        timestamp: new Date().toISOString()
+    });
+    if (!sent) { pendingPingId = null; return; }
+    if (heartbeatTimeoutTimer !== null) window.clearTimeout(heartbeatTimeoutTimer);
+    heartbeatTimeoutTimer = window.setTimeout(() => {
+        if (!pendingPingId) return;
+        console.warn('[RemoteControl] VPBridge heartbeat ping timed out; reconnecting');
+        reconnectNow();
+    }, HEARTBEAT_GRACE_MS);
+}
+function checkHeartbeat(): void {
+    heartbeatTimer = null;
+    if (socket?.readyState !== WebSocket.OPEN) return;
+    if (pendingPingId) return;
+    if (Date.now() - lastPeerActivityAt >= heartbeatIntervalMs) sendServerPing();
+    else scheduleHeartbeatCheck();
+}
+function handleServerPingResponse(message: JsonObject): boolean {
+    if (!pendingPingId || message.from !== 'server' || message.recipient !== 'vp') return false;
+    if (message.correlationId !== pendingPingId) return false;
+    if (message.type !== 'response' && message.type !== 'error') return false;
+
+    pendingPingId = null;
+    if (heartbeatTimeoutTimer !== null) { window.clearTimeout(heartbeatTimeoutTimer); heartbeatTimeoutTimer = null; }
+
+    if (message.type === 'error') {
+        console.warn('[RemoteControl] VPBridge ping returned protocol error', message);
+        reconnectNow();
+        return true;
+    }
+
+    const result = message.result;
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+        const heartbeat = (result as JsonObject).heartbeat;
+        if (heartbeat && typeof heartbeat === 'object' && !Array.isArray(heartbeat)) {
+            const interval = (heartbeat as JsonObject).intervalMs;
+            if (typeof interval === 'number' && Number.isFinite(interval) && interval > 0) heartbeatIntervalMs = interval;
+        }
+        const mailboxes = (result as JsonObject).mailboxes;
+        if (mailboxes && typeof mailboxes === 'object' && !Array.isArray(mailboxes)) {
+            const bc = (mailboxes as JsonObject).bc;
+            const bcConnected = !!(bc && typeof bc === 'object' && !Array.isArray(bc) && (bc as JsonObject).connected === true);
+            console.info(`[RemoteControl] VPBridge heartbeat ok; BC ${bcConnected ? 'connected' : 'not connected'}, interval=${heartbeatIntervalMs}ms`);
+        }
+    }
+
+    lastPeerActivityAt = Date.now();
+    scheduleHeartbeatCheck();
+    return true;
+}
+function reconnectNow(): void {
+    resetHeartbeatSession();
+    remoteCommandHandler.setSender(null);
+    if (socket) {
+        const current = socket;
+        socket = null;
+        current.onclose = null;
+        try { current.close(); } catch { /* ignore */ }
+    }
+    if (!getEnabled()) return;
+    clearReconnectTimer();
+    reconnectTimer = window.setTimeout(connect, 0);
+}
 function disconnect(): void {
     clearReconnectTimer();
+    resetHeartbeatSession();
     remoteCommandHandler.setSender(null);
     if (socket) { socket.onclose = null; socket.close(); socket = null; }
 }
@@ -47,14 +155,27 @@ function connect(): void {
     try {
         socket = new WebSocket(url);
         remoteCommandHandler.setSender(message => {
-            if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
-            else console.warn('[RemoteControl] Cannot send VPP message: WebSocket is not open', message);
+            if (!sendRaw(message)) console.warn('[RemoteControl] Cannot send VPP message: WebSocket is not open', message);
         });
-        socket.onopen = () => { clearReconnectTimer(); console.info(`[RemoteControl] Connected to ${url}`); };
-        socket.onmessage = event => remoteCommandHandler.handle(event.data);
+        socket.onopen = () => {
+            clearReconnectTimer();
+            lastPeerActivityAt = Date.now();
+            console.info(`[RemoteControl] Connected to ${url}`);
+            sendServerPing();
+        };
+        socket.onmessage = event => {
+            const parsed = remoteCommandHandler.handle(event.data);
+            if (!parsed) return;
+            if (handleServerPingResponse(parsed)) return;
+            if (parsed.from === 'bc') {
+                lastPeerActivityAt = Date.now();
+                scheduleHeartbeatCheck();
+            }
+        };
         socket.onerror = () => console.warn(`[RemoteControl] WebSocket connection failed: ${url}`);
         socket.onclose = () => {
             socket = null;
+            resetHeartbeatSession();
             remoteCommandHandler.setSender(null);
             if (!getEnabled()) return;
             reconnectTimer = window.setTimeout(connect, 2000);
