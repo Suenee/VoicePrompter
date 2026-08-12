@@ -12,11 +12,14 @@ type PublicMethod =
     | 'goFinish';
 
 type MessageType = 'call' | 'event' | 'progress' | 'response' | 'error';
+type RoutingName = 'vp' | 'bc' | 'server';
 
 interface CallMessage extends JsonObject {
     protocolVersion: number;
     id: string;
     type: 'call';
+    from: RoutingName;
+    recipient: RoutingName;
     method: string;
     args: JsonObject;
     expectsResponse?: boolean;
@@ -36,6 +39,7 @@ export class RemoteCommandHandler {
     };
 
     private readonly messageTypes = new Set<MessageType>(['call', 'event', 'progress', 'response', 'error']);
+    private readonly routingNames = new Set<RoutingName>(['vp', 'bc', 'server']);
 
     setSender(sender: Sender | null): void {
         this.sender = sender;
@@ -45,7 +49,7 @@ export class RemoteCommandHandler {
         this.send(message);
     }
 
-    handle(rawMessage: unknown): void {
+    handle(rawMessage: unknown): JsonObject | null {
         const text = typeof rawMessage === 'string' ? rawMessage : String(rawMessage ?? '');
         let message: JsonObject;
 
@@ -53,26 +57,31 @@ export class RemoteCommandHandler {
             const parsed = JSON.parse(text);
             if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
                 console.warn('[VPP] DROPPED - INVALID VPP MESSAGE: top-level JSON value must be an object', parsed);
-                return;
+                return null;
             }
             message = parsed as JsonObject;
         } catch {
             console.warn('[VPP] DROPPED - INVALID JSON:', text);
-            return;
+            return null;
         }
 
         const envelopeError = this.validateEnvelope(message);
         if (envelopeError) {
             this.rejectInvalidMessage(message, envelopeError);
-            return;
+            return null;
         }
 
         if (message.protocolVersion !== 1) {
-            this.sendError(message, 'UNSUPPORTED_PROTOCOL_VERSION', 'Unsupported protocol version', {
+            this.sendError(message, 'UNSUPPORTED_PROTOCOL', 'Unsupported protocol version', {
                 received: message.protocolVersion,
                 supported: 1
             });
-            return;
+            return null;
+        }
+
+        if (message.recipient !== 'vp') {
+            console.warn('[VPP] DROPPED - INVALID ROUTING: message is not addressed to vp', message);
+            return null;
         }
 
         console.log('[VPP] Message received:', message);
@@ -81,40 +90,53 @@ export class RemoteCommandHandler {
             const callError = this.validateCall(message);
             if (callError) {
                 this.rejectInvalidMessage(message, callError);
-                return;
+                return null;
             }
             void this.handleCall(message as CallMessage);
-            return;
+        } else {
+            console.log(`[VPP] ${message.type} received:`, message);
         }
 
-        console.log(`[VPP] ${message.type} received (no handler yet):`, message);
+        return message;
     }
 
     private validateEnvelope(message: JsonObject): string | null {
         if (typeof message.protocolVersion !== 'number' || !Number.isInteger(message.protocolVersion)) return 'protocolVersion must be an integer';
         if (typeof message.id !== 'string' || message.id.trim() === '') return 'id must be a non-empty string';
         if (typeof message.type !== 'string' || !this.messageTypes.has(message.type as MessageType)) return 'type must be one of: call, event, progress, response, error';
-        if (message.source !== undefined && (!message.source || typeof message.source !== 'object' || Array.isArray(message.source))) return 'source must be an object when present';
-        if (message.timestamp !== undefined && (typeof message.timestamp !== 'string' || message.timestamp.trim() === '')) return 'timestamp must be a non-empty string when present';
+        if (typeof message.from !== 'string' || !this.routingNames.has(message.from as RoutingName)) return 'from must be one of: vp, bc, server';
+        if (typeof message.recipient !== 'string' || !this.routingNames.has(message.recipient as RoutingName)) return 'recipient must be one of: vp, bc, server';
+        if (!message.source || typeof message.source !== 'object' || Array.isArray(message.source)) return 'source must be an object';
+        if (typeof message.timestamp !== 'string' || message.timestamp.trim() === '') return 'timestamp must be a non-empty string';
         if (message.correlationId !== undefined && (typeof message.correlationId !== 'string' || message.correlationId.trim() === '')) return 'correlationId must be a non-empty string when present';
+        if (message.expectsResponse !== undefined && typeof message.expectsResponse !== 'boolean') return 'expectsResponse must be boolean when present';
         return null;
     }
 
     private validateCall(message: JsonObject): string | null {
+        if (message.from !== 'bc') return 'application calls to vp must come from bc';
         if (typeof message.method !== 'string' || message.method.trim() === '') return 'call.method must be a non-empty string';
         if (!message.args || typeof message.args !== 'object' || Array.isArray(message.args)) return 'call.args must be a JSON object';
-        if (message.expectsResponse !== undefined && typeof message.expectsResponse !== 'boolean') return 'call.expectsResponse must be boolean when present';
+
+        const method = message.method as PublicMethod;
+        if (!this.publicMethods[method]) return `unknown method: ${message.method}`;
 
         const args = message.args as JsonObject;
-        if (args.offset !== undefined && (typeof args.offset !== 'number' || !Number.isFinite(args.offset) || !Number.isInteger(args.offset))) {
-            return 'call.args.offset must be a finite integer when present';
+        const keys = Object.keys(args);
+        if (method === 'goStart' || method === 'goFinish') {
+            if (keys.length !== 0) return `${method} does not accept arguments`;
+            return null;
         }
+
+        if (keys.some(key => key !== 'offset')) return `${method} accepts only the offset argument`;
+        if (args.offset === undefined) return `${method}.offset is required`;
+        if (typeof args.offset !== 'number' || !Number.isFinite(args.offset) || !Number.isInteger(args.offset)) return `${method}.offset must be a finite integer`;
         return null;
     }
 
     private rejectInvalidMessage(message: JsonObject, reason: string): void {
         console.warn(`[VPP] DROPPED - INVALID VPP MESSAGE: ${reason}`, message);
-        if (typeof message.id === 'string' && message.id.trim() !== '') {
+        if (message.expectsResponse === true && typeof message.id === 'string' && message.id.trim() !== '') {
             this.sendError(message, 'INVALID_MESSAGE', 'Message does not conform to VoicePrompter Protocol', { reason });
         }
     }
@@ -124,8 +146,7 @@ export class RemoteCommandHandler {
         const handler = this.publicMethods[method];
 
         if (!handler) {
-            console.warn(`[VPP] Method not allowed or unknown: ${String(call.method)}`);
-            this.sendError(call, 'METHOD_NOT_FOUND', 'Requested method does not exist or is not public', { method: call.method });
+            if (call.expectsResponse) this.sendError(call, 'UNKNOWN_METHOD', 'Requested method does not exist or is not public', { method: call.method });
             return;
         }
 
@@ -137,6 +158,8 @@ export class RemoteCommandHandler {
                     id: crypto.randomUUID(),
                     correlationId: call.id,
                     type: 'response',
+                    from: 'vp',
+                    recipient: 'bc',
                     result: { success: true },
                     source: { app: 'VoicePrompter', version: 'devel' },
                     timestamp: new Date().toISOString()
@@ -144,19 +167,24 @@ export class RemoteCommandHandler {
             }
         } catch (error) {
             console.error(`[VPP] Method failed: ${call.method}`, error);
-            this.sendError(call, 'METHOD_FAILED', 'Unable to execute requested operation', {
-                method: call.method,
-                reason: error instanceof Error ? error.message : String(error)
-            });
+            if (call.expectsResponse) {
+                this.sendError(call, 'COMMAND_FAILED', 'Unable to execute requested operation', {
+                    method: call.method,
+                    reason: error instanceof Error ? error.message : String(error)
+                });
+            }
         }
     }
 
     private sendError(original: JsonObject, code: string, message: string, details?: JsonObject): void {
+        const recipient = original.from === 'server' ? 'server' : 'bc';
         this.send({
             protocolVersion: 1,
             id: crypto.randomUUID(),
             ...(typeof original.id === 'string' ? { correlationId: original.id } : {}),
             type: 'error',
+            from: 'vp',
+            recipient,
             error: { code, message, ...(details ? { details } : {}) },
             source: { app: 'VoicePrompter', version: 'devel' },
             timestamp: new Date().toISOString()
@@ -172,7 +200,7 @@ export class RemoteCommandHandler {
     }
 
     private offset(args: JsonObject): number {
-        return args.offset === undefined ? 0 : args.offset as number;
+        return args.offset as number;
     }
 
     private relativeDirection(offset: number, defaultDirection: 1 | -1): 1 | -1 {
@@ -181,7 +209,7 @@ export class RemoteCommandHandler {
     }
 
     public async goStart(args: JsonObject): Promise<void> {
-        console.log('[VPP] goStart() offset ignored for now', args);
+        console.log('[VPP] goStart()', args);
         const { goStart } = await import('./navigation');
         goStart();
     }
@@ -243,7 +271,7 @@ export class RemoteCommandHandler {
     }
 
     public async goFinish(args: JsonObject): Promise<void> {
-        console.log('[VPP] goFinish() offset ignored for now', args);
+        console.log('[VPP] goFinish()', args);
         const { goFinish } = await import('./navigation');
         goFinish();
     }
