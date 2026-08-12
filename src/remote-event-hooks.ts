@@ -14,7 +14,6 @@ interface MarkerHookArgs {
 
 export class RemoteEventHooks {
     public HookMarker(args: MarkerHookArgs): void {
-        // `text` is kept only as the internal VP hook input alias. It is never emitted in VPP.
         const marker = String(args?.marker ?? args?.text ?? '').trim();
         if (!marker) return;
 
@@ -28,9 +27,12 @@ export class RemoteEventHooks {
             protocolVersion: 1,
             id: crypto.randomUUID(),
             type: 'event',
+            from: 'vp',
+            recipient: 'bc',
             event: 'marker',
             command: parsed.command,
             args: parsed.args,
+            expectsResponse: true,
             source: { app: 'VoicePrompter', version: 'devel' },
             timestamp: new Date().toISOString()
         });
