@@ -2,292 +2,236 @@
 
 Protocol version: **1**
 
-VoicePrompter Protocol (VPP) is the application-level JSON protocol used between VoicePrompter and integrations such as VoicePrompterModule.
+VoicePrompter Protocol (VPP) is the application-level JSON protocol used between VoicePrompter, VoicePrompterModule and VoicePrompterBridge.
 
-VoicePrompterBridge is only a transport layer. It authenticates connections, maintains transport queues, validates that each WebSocket message is syntactically valid JSON, and forwards the JSON unchanged. VPBridge MUST NOT interpret fields defined by this protocol.
+VoicePrompterBridge is primarily a transport layer. It authenticates connections, maintains transport queues, validates that each WebSocket message is syntactically valid JSON, routes messages by mailbox, and handles only explicitly defined messages addressed to `server`.
 
 ## Common envelope
 
-Every protocol message SHOULD contain:
+Every VPP message MUST contain `protocolVersion`, unique `id`, `type`, `from`, `recipient`, `source`, and `timestamp`.
 
 ```json
 {
   "protocolVersion": 1,
   "id": "019c7f8e-7c5d-7a91-bfa3-2c6b78a6a421",
   "type": "call",
+  "from": "bc",
+  "recipient": "vp",
   "source": {
     "app": "VoicePrompterModule",
-    "version": "0.5.0",
+    "version": "0.8.0",
     "companionVersion": "dev"
   },
-  "timestamp": "2026-08-11T20:54:31.152+02:00"
+  "timestamp": "2026-08-12T10:46:00.000+02:00"
 }
 ```
 
-`id` uniquely identifies the individual message. UUIDv7 is preferred. IDs MUST NOT be reused after restart.
+`from` identifies the logical sending mailbox. `recipient` identifies the destination. Protocol version 1 defines exactly three routing names:
 
-`timestamp` is an RFC 3339 / ISO 8601 timestamp including milliseconds and timezone offset.
+- `vp` — VoicePrompter mailbox;
+- `bc` — VoicePrompterModule / Bitfocus Companion mailbox;
+- `server` — VoicePrompterBridge itself.
 
-`protocolVersion` identifies the application protocol independently of application versions.
+VPBridge maintains exactly two transport mailboxes in VPP v1: `vp` and `bc`. `server` is not a mailbox. A connection to `/vp` owns mailbox `vp`; a connection to `/bc` owns mailbox `bc`.
 
-`source` is diagnostic metadata. `app` identifies the sender, `version` is the sender version, and host-version fields such as `companionVersion` may be added when relevant.
+`from` MUST match the mailbox through which the message was received. VPBridge MUST reject a message whose `from` does not match its connection mailbox. Messages addressed to `vp` or `bc` MUST be routed only to that mailbox. Messages addressed to `server` MUST be consumed by VPBridge and MUST NOT be forwarded.
 
-## Correlation
+`source` contains diagnostic application/version metadata and is distinct from routing identity.
 
-A message that relates to a previous message MUST contain `correlationId` equal to the original message's `id`.
+`id` uniquely identifies one message. IDs MUST NOT be reused. UUIDv7 is preferred; another sufficiently unique UUID is acceptable.
 
-A single call may therefore produce zero or more progress messages followed by one terminal response or error. Multiple calls may be in flight simultaneously.
+## Correlation and acknowledgements
 
-## Message types
+A message related to a previous message MUST contain `correlationId` equal to the original message's `id`. Multiple requests may be in flight simultaneously and correlation MUST therefore be based on IDs, never on ordering.
 
-### call
+Any VPP message with `expectsResponse: true` creates a request and MUST terminate with exactly one correlated `response` or `error`. Zero or more correlated `progress` messages MAY precede the terminal message.
 
-Requests execution of a public protocol method.
+A `response` means the message arrived and requested processing completed successfully. Its `result` MAY contain only a success acknowledgement or additional requested result data.
 
-```json
-{
-  "protocolVersion": 1,
-  "id": "...",
-  "type": "call",
-  "method": "goCurrent",
-  "args": {
-    "offset": 1
-  },
-  "expectsResponse": false,
-  "source": {
-    "app": "VoicePrompterModule",
-    "version": "0.5.0"
-  },
-  "timestamp": "2026-08-11T20:54:31.152+02:00"
-}
-```
+An `error` means the message arrived but processing failed, was rejected, was unsupported, or could not be completed.
 
-`method` is the stable public protocol method name.
+Receipt of a valid message from the opposite mailbox, including `progress`, `response` or `error`, is proof of life and refreshes the peer-activity timer.
 
-For `call` messages, `args` MUST be a JSON object. Use `{}` when a method has no arguments.
+## call
 
-`expectsResponse` indicates whether the caller expects a terminal `response` or `error`.
+`call` requests execution of a public protocol method.
 
-Initial navigation methods:
+`args` MUST be a JSON object. Use `{}` when there are no arguments. Each method has a deterministic argument schema. A receiver MUST reject unknown methods, unknown arguments, missing required arguments, or arguments of the wrong type with a correlated protocol `error` when `expectsResponse` is true.
 
-- `goStart`
-- `markerBack`
-- `goBack`
-- `goCurrent`
-- `goNext`
-- `markerNext`
-- `goFinish`
+Initial VoicePrompter navigation methods:
 
-Navigation offset semantics currently implemented by VoicePrompter:
+- `goStart` — `args: {}`;
+- `markerBack` — `args: { "offset": <integer> }`;
+- `goBack` — `args: { "offset": <integer> }`;
+- `goCurrent` — `args: { "offset": <integer> }`;
+- `goNext` — `args: { "offset": <integer> }`;
+- `markerNext` — `args: { "offset": <integer> }`;
+- `goFinish` — `args: {}`.
 
-- omitted `offset` is treated as `0`;
-- `goNext`: positive moves forward, negative moves backward, `0` does nothing;
-- `goBack`: positive moves backward, negative moves forward, `0` does nothing;
-- `markerNext`: positive moves to following markers, negative to previous markers, `0` does nothing;
-- `markerBack`: positive moves to previous markers, negative to following markers, `0` does nothing;
-- `goCurrent`: sign is ignored; `0` does nothing, `1` moves to the start of the current paragraph, `2` to the previous paragraph, `3` to the paragraph before that, etc.;
-- `goStart` and `goFinish` currently ignore `offset` and perform only the native start/finish action.
+Offset semantics: `goNext` positive moves forward and negative backward; `goBack` is the reverse; `markerNext` and `markerBack` follow the analogous marker direction. `goCurrent` ignores sign: 0 does nothing, 1 goes to the current paragraph start, 2 to the previous paragraph, etc. `goStart` and `goFinish` do not use an offset.
 
-### event
+Navigation calls SHOULD use `expectsResponse: true`. VoicePrompter MUST return a terminal `response` after successful execution or `error` after failure.
 
-Reports an unsolicited event.
+## event
 
-Event-specific arguments use the field `args`. Unlike `call.args`, an event MAY define the shape of `args` specifically for that event.
+Events report unsolicited events. An event MAY set `expectsResponse: true` when the sender needs explicit confirmation that the event was accepted and processed.
 
-#### marker event
+Event schemas are deterministic per event name.
 
-VoicePrompter emits a `marker` event when reading crosses a skipped marker enclosed in square brackets.
+### marker event
 
-Example marker in the script:
+VoicePrompter emits a `marker` event when reading crosses a skipped marker in square brackets.
 
-```text
-[VLC PLAY 2]
-```
+`command` is a non-empty string containing the marker command/name. `args` is a JSON array containing the marker's ordered arguments. Numbers are JSON numbers; quoted values are strings. VoicePrompter parses marker syntax but does not interpret command meaning.
 
-VPP message:
+Example `[VLC PLAY 2, "Intro.mp4", 5]` becomes:
 
 ```json
 {
   "protocolVersion": 1,
   "id": "...",
   "type": "event",
+  "from": "vp",
+  "recipient": "bc",
   "event": "marker",
   "command": "VLC PLAY",
-  "args": [2],
-  "source": {
-    "app": "VoicePrompter",
-    "version": "devel"
-  },
-  "timestamp": "2026-08-11T20:54:34.521+02:00"
+  "args": [2, "Intro.mp4", 5],
+  "expectsResponse": true,
+  "source": { "app": "VoicePrompter", "version": "..." },
+  "timestamp": "..."
 }
 ```
 
-For `marker` events:
+Additional marker arguments MUST be comma-separated. String arguments MUST be double-quoted. Invalid marker syntax MUST NOT be emitted and SHOULD be logged diagnostically.
 
-- `command` is the marker command/name;
-- `args` is always a JSON array;
-- numbers are emitted as JSON numbers;
-- quoted values are emitted as JSON strings;
-- the marker brackets are not transmitted as part of `command` or `args`;
-- VoicePrompter parses marker syntax but does not interpret the meaning of `command`.
+When `expectsResponse` is true, VPM returns `response` after successfully parsing/publishing the marker event or `error` if it cannot process it.
 
-Marker syntax rules:
+## progress
 
-1. The marker body begins with the command.
-2. The command extends from the beginning of the marker to the first numeric argument or quoted string argument.
-3. Command whitespace is normalized to single spaces, but letter case is preserved.
-4. A marker with no arguments produces an empty `args` array.
-5. The first argument follows the command after whitespace.
-6. Additional arguments MUST be separated by commas.
-7. Numeric arguments may be signed and may contain a decimal point.
-8. String arguments MUST be enclosed in double quotes. Backslash may escape a quote or backslash inside a string.
-9. Unquoted non-numeric values are considered part of the command before the first argument. After argument parsing has started, unquoted non-numeric values are invalid.
-10. Invalid marker syntax is not emitted as a VPP marker event and SHOULD be logged diagnostically by VoicePrompter.
+`progress` reports that work for a previous request is still in progress. `correlationId` is required. Progress does not terminate the request.
 
-Examples:
+## response
 
-```text
-[CAM 1]
-```
+`response` is the terminal successful response to a previous message that requested a response. `correlationId` is required and MUST equal the original message's `id`.
+
+A simple acknowledgement MAY use:
 
 ```json
-{
-  "command": "CAM",
-  "args": [1]
-}
+"result": { "success": true }
 ```
 
-```text
-[SLIDE 12]
-```
+## error
 
-```json
-{
-  "command": "SLIDE",
-  "args": [12]
-}
-```
+`error` is the terminal unsuccessful response. For an error concerning a specific previous message, `correlationId` is required and MUST equal that message's `id`.
 
-```text
-[VLC STOP]
-```
+`error.code` is stable and machine-readable. `error.message` is human-readable. `error.details` is optional structured diagnostic data.
 
-```json
-{
-  "command": "VLC STOP",
-  "args": []
-}
-```
+Recommended common error codes include `INVALID_MESSAGE`, `INVALID_ROUTING`, `UNKNOWN_METHOD`, `UNKNOWN_ARGUMENT`, `INVALID_ARGUMENT`, `COMMAND_FAILED`, `UNSUPPORTED_PROTOCOL`, and `TIMEOUT`.
 
-```text
-[OBS SCENE "Camera 1"]
-```
+## Server ping
 
-```json
-{
-  "command": "OBS SCENE",
-  "args": ["Camera 1"]
-}
-```
+`ping` is a system `call` handled by VPBridge. It verifies the bridge connection and obtains current mailbox state and heartbeat policy.
 
-```text
-[VLC PLAY 2, "Intro.mp4", 5]
-```
+A ping MUST use:
 
-```json
-{
-  "command": "VLC PLAY",
-  "args": [2, "Intro.mp4", 5]
-}
-```
+- `from`: the caller's mailbox (`vp` or `bc`);
+- `recipient: "server"`;
+- `method: "ping"`;
+- `args: {}`;
+- `expectsResponse: true`.
 
-### progress
-
-Reports that work associated with a previous call is still in progress. `correlationId` is required.
+Example:
 
 ```json
 {
   "protocolVersion": 1,
   "id": "...",
-  "correlationId": "<call-id>",
-  "type": "progress",
-  "data": {
-    "message": "Processing",
-    "percent": 10
-  },
-  "source": {
-    "app": "VoicePrompter",
-    "version": "..."
-  },
-  "timestamp": "2026-08-11T20:54:31.301+02:00"
+  "type": "call",
+  "from": "vp",
+  "recipient": "server",
+  "method": "ping",
+  "args": {},
+  "expectsResponse": true,
+  "source": { "app": "VoicePrompter", "version": "..." },
+  "timestamp": "..."
 }
 ```
 
-Progress does not terminate the request.
+VPBridge MUST consume the ping locally and MUST NOT forward it.
 
-### response
-
-Terminal successful response to a call. `correlationId` is required.
+Response:
 
 ```json
 {
   "protocolVersion": 1,
   "id": "...",
-  "correlationId": "<call-id>",
+  "correlationId": "<ping-id>",
   "type": "response",
+  "from": "server",
+  "recipient": "vp",
   "result": {
-    "success": true
-  },
-  "source": {
-    "app": "VoicePrompter",
-    "version": "..."
-  },
-  "timestamp": "2026-08-11T20:54:35.112+02:00"
-}
-```
-
-### error
-
-Terminal unsuccessful response to a call. `correlationId` is required when the error concerns a specific previous message.
-
-```json
-{
-  "protocolVersion": 1,
-  "id": "...",
-  "correlationId": "<call-id>",
-  "type": "error",
-  "error": {
-    "code": "METHOD_FAILED",
-    "message": "Unable to execute requested operation",
-    "details": {
-      "reason": "Presentation is not active"
+    "mailboxes": {
+      "vp": { "connected": true },
+      "bc": { "connected": true }
+    },
+    "heartbeat": {
+      "intervalMs": 30000
     }
   },
-  "source": {
-    "app": "VoicePrompter",
-    "version": "..."
-  },
-  "timestamp": "2026-08-11T20:54:35.112+02:00"
+  "source": { "app": "VoicePrompterBridge", "version": "..." },
+  "timestamp": "..."
 }
 ```
 
-`error.code` is a stable machine-readable identifier. `error.message` is human-readable. `error.details` is optional structured diagnostic data.
+The same response shape is used for a ping originating from `bc`; only `recipient` changes to `bc`.
+
+The `mailboxes` object is keyed by mailbox name. `connected` reports whether the mailbox currently has an active WebSocket owner. VPP v1 defines exactly the `vp` and `bc` entries, but clients SHOULD read status by mailbox name rather than depend on dedicated fields such as `vpConnected` or `bcConnected`.
+
+An unsupported message addressed to `server` SHOULD receive a correlated `error` and MUST NOT be forwarded.
+
+## Heartbeat / idle health check
+
+VPBridge is authoritative for the heartbeat interval. The default is **30000 ms (30 seconds)**. The interval is configured once on VPBridge and distributed to both clients in the server ping response as `result.heartbeat.intervalMs`.
+
+VP and VPM MUST obtain the heartbeat interval after establishing/re-establishing their WebSocket connection. The value is session state; clients MUST obtain it again after reconnect rather than relying permanently on a cached value.
+
+Normal valid VPP traffic from the opposite mailbox is proof of life. If peer traffic has occurred within the heartbeat interval, no heartbeat ping is necessary.
+
+After a full heartbeat interval without valid peer traffic, the client sends a `ping` to `server` to obtain current mailbox state.
+
+Clients use a fixed implementation grace period of **5000 ms (5 seconds)** after sending the heartbeat ping. This grace period is hard-coded in VP and VPM, is not configured by VPBridge, and exists to absorb scheduler, processing and network jitter so connection status does not oscillate at the boundary.
+
+With the default interval, a client therefore allows up to **35000 ms (35 seconds)** from the last confirmed peer activity before treating the expected health confirmation as failed.
+
+A valid ping response with the opposite mailbox `connected: false` means the bridge connection is alive but the peer is unavailable. Failure to receive the ping response within the 5-second grace period means the VPBridge connection itself is unhealthy and the client SHOULD reconnect.
+
+## Connection-state interpretation
+
+Clients SHOULD expose these three states:
+
+- **connected** — WebSocket to VPBridge is healthy and the opposite mailbox is connected;
+- **bridge-only** — WebSocket to VPBridge is healthy but the opposite mailbox is not connected;
+- **disconnected** — VPBridge WebSocket is not healthy or server ping timed out.
 
 ## VPBridge transport rule
 
 VPBridge SHALL:
 
-1. authenticate the WebSocket connection according to its own transport configuration;
-2. accept messages only when the complete WebSocket message is syntactically valid JSON;
-3. forward valid JSON unchanged to the opposite endpoint according to FIFO/buffer rules;
-4. reject invalid JSON and record `DROPPED - INVALID JSON` in its diagnostic log.
+1. authenticate the WebSocket connection according to its transport configuration;
+2. accept only complete syntactically valid JSON messages;
+3. verify the routing envelope fields needed for transport (`from`, `recipient`);
+4. route messages addressed to `vp` or `bc` unchanged to the named mailbox according to FIFO/buffer rules;
+5. consume messages addressed to `server` locally and never forward them;
+6. interpret only system methods explicitly defined by VPP for `recipient: "server"`;
+7. maintain current connected/disconnected state of the `vp` and `bc` mailboxes;
+8. reject invalid JSON and log the drop diagnostically.
 
-VPBridge SHALL NOT validate or interpret `protocolVersion`, `id`, `correlationId`, `type`, `method`, `args`, `event`, `command`, `data`, `result`, `error`, `source`, or `timestamp`.
+Except for routing and explicitly defined `server` methods, VPBridge SHALL NOT interpret application-level VPP fields such as application methods, marker commands, application arguments, results, progress data, or application errors.
 
 ## Compatibility
 
-Receivers SHOULD ignore unknown optional fields.
+A receiver unable to support `protocolVersion` SHOULD return `UNSUPPORTED_PROTOCOL` when a correlated response is possible.
 
-A receiver that cannot support a protocol version or requested method SHOULD return a protocol `error` when a response is possible.
+Receivers MAY ignore unknown optional metadata fields, but MUST NOT silently accept unknown deterministic method/event arguments.
 
-Application version and Companion version are diagnostic metadata and do not replace `protocolVersion`.
+Application and Companion versions are diagnostic metadata and do not replace `protocolVersion`.
