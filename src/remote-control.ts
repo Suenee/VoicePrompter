@@ -1,5 +1,6 @@
 import { loadSetting, saveSetting } from './storage';
 import { remoteCommandHandler } from './remote-command-handler';
+import { state } from './state';
 
 const DEFAULT_IP = '127.0.0.1';
 const DEFAULT_PORT = 8170;
@@ -8,6 +9,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 30000;
 const HEARTBEAT_GRACE_MS = 5000;
 const GDOC_REMEMBER_KEY = 'voiceprompter_gdoc_remember';
 const GDOC_REMEMBER_DAYS = 7;
+const STATUS_BAR_POSITION_KEY = 'statusBarPosition';
 
 let socket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
@@ -16,10 +18,26 @@ let heartbeatTimeoutTimer: number | null = null;
 let heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
 let lastPeerActivityAt = 0;
 let pendingPingId: string | null = null;
+let statusBarClockTimer: number | null = null;
 
 type JsonObject = Record<string, unknown>;
 type RemoteStatus = 'disabled' | 'error' | 'bridge-only' | 'connected';
+type StatusBarPosition = 'off' | 'top' | 'bottom';
+type StatusBarAlign = 'left' | 'center' | 'right';
+interface StatusBarZone { text: string; align: StatusBarAlign; }
+
 let remoteStatus: RemoteStatus = 'disabled';
+let statusBarPosition: StatusBarPosition = loadSetting(STATUS_BAR_POSITION_KEY, 'off') as StatusBarPosition;
+let statusBarZones: StatusBarZone[] | null = null;
+
+function normalizeStatusBarPosition(value: unknown): StatusBarPosition {
+    return value === 'top' || value === 'bottom' ? value : 'off';
+}
+statusBarPosition = normalizeStatusBarPosition(statusBarPosition);
+
+function getStatusBarEnabled(): boolean {
+    return statusBarPosition !== 'off' && getEnabled() && socket?.readyState === WebSocket.OPEN;
+}
 
 function setRemoteStatus(status: RemoteStatus): void {
     remoteStatus = status;
@@ -31,21 +49,18 @@ function setRemoteStatus(status: RemoteStatus): void {
             'bridge-only': { icon: '▲', color: '#facc15', title: 'Connected to VPBridge, but Bitfocus Companion is not connected' },
             connected: { icon: '✓', color: '#22c55e', title: 'Connected: VPBridge and Bitfocus Companion are available' }
         };
-        const state = states[status];
-        el.textContent = state.icon;
-        el.style.color = state.color;
-        el.title = state.title;
-        el.setAttribute('aria-label', state.title);
+        const current = states[status];
+        el.textContent = current.icon;
+        el.style.color = current.color;
+        el.title = current.title;
+        el.setAttribute('aria-label', current.title);
     }
 
     const toggleTrack = document.getElementById('remoteControlToggleTrack');
     if (toggleTrack) {
-        toggleTrack.style.backgroundColor = status === 'connected'
-            ? '#22c55e'
-            : status === 'disabled'
-                ? '#404040'
-                : '#FFBB00';
+        toggleTrack.style.backgroundColor = status === 'connected' ? '#22c55e' : status === 'disabled' ? '#404040' : '#FFBB00';
     }
+    updateStatusBarVisibility();
 }
 
 function isValidIPv4(value: string): boolean {
@@ -133,7 +148,7 @@ function reconnectNow(): void {
 function disconnect(): void {
     clearReconnectTimer(); resetHeartbeatSession(); remoteCommandHandler.setSender(null);
     if (socket) { socket.onclose = null; socket.close(); socket = null; }
-    setRemoteStatus('disabled');
+    setRemoteStatus('disabled'); updateStatusBarVisibility();
 }
 function connect(): void {
     disconnect();
@@ -145,7 +160,7 @@ function connect(): void {
     try {
         socket = new WebSocket(url);
         remoteCommandHandler.setSender(message => { if (!sendRaw(message)) console.warn('[RemoteControl] Cannot send VPP message: WebSocket is not open', message); });
-        socket.onopen = () => { clearReconnectTimer(); lastPeerActivityAt = Date.now(); console.info(`[RemoteControl] Connected to ${url}`); sendServerPing(); };
+        socket.onopen = () => { clearReconnectTimer(); lastPeerActivityAt = Date.now(); console.info(`[RemoteControl] Connected to ${url}`); updateStatusBarVisibility(); sendServerPing(); };
         socket.onmessage = event => {
             const parsed = remoteCommandHandler.handle(event.data); if (!parsed) return;
             if (handleServerPingResponse(parsed)) return;
@@ -153,13 +168,105 @@ function connect(): void {
         };
         socket.onerror = () => { console.warn(`[RemoteControl] WebSocket connection failed: ${url}`); setRemoteStatus('error'); };
         socket.onclose = () => {
-            socket = null; resetHeartbeatSession(); remoteCommandHandler.setSender(null);
+            socket = null; resetHeartbeatSession(); remoteCommandHandler.setSender(null); updateStatusBarVisibility();
             if (!getEnabled()) { setRemoteStatus('disabled'); return; }
             setRemoteStatus('error'); reconnectTimer = window.setTimeout(connect, 2000);
         };
     } catch (error) {
         console.warn('[RemoteControl] Failed to create WebSocket connection:', error); setRemoteStatus('error'); reconnectTimer = window.setTimeout(connect, 2000);
     }
+}
+
+function ensureStatusBarStyles(): void {
+    if (document.getElementById('voicePrompterStatusBarStyles')) return;
+    const style = document.createElement('style');
+    style.id = 'voicePrompterStatusBarStyles';
+    style.textContent = `
+        @keyframes vp-status-spin { to { transform: rotate(360deg); } }
+        #voicePrompterStatusBar { box-sizing:border-box; }
+        #voicePrompterStatusBar .vp-status-zone { min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    `;
+    document.head.appendChild(style);
+}
+
+function createStatusBar(): HTMLElement {
+    let bar = document.getElementById('voicePrompterStatusBar');
+    if (bar) return bar;
+    ensureStatusBarStyles();
+    bar = document.createElement('div');
+    bar.id = 'voicePrompterStatusBar';
+    bar.className = 'hidden fixed left-0 right-0 h-8 px-4 bg-neutral-900/95 border-neutral-700 text-neutral-200 text-xs font-mono items-center pointer-events-none select-none';
+    bar.style.zIndex = '9000';
+    document.body.appendChild(bar);
+    return bar;
+}
+
+function formatClock(): string {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+}
+
+function placeholderZones(): StatusBarZone[] {
+    return [
+        { text: 'WAITING', align: 'left' },
+        { text: formatClock(), align: 'right' }
+    ];
+}
+
+function renderStatusBar(): void {
+    const bar = createStatusBar();
+    const zones = statusBarZones?.length ? statusBarZones.slice(0, 6) : placeholderZones();
+    bar.style.display = getStatusBarEnabled() ? 'grid' : 'none';
+    if (!getStatusBarEnabled()) return;
+
+    bar.style.top = statusBarPosition === 'top' ? '0' : '';
+    bar.style.bottom = statusBarPosition === 'bottom' ? '0' : '';
+    bar.style.borderTopWidth = statusBarPosition === 'bottom' ? '1px' : '0';
+    bar.style.borderBottomWidth = statusBarPosition === 'top' ? '1px' : '0';
+    bar.style.opacity = Math.max(0, Math.min(1, state.config.dockOpacity / 100)).toString();
+    bar.style.gridTemplateColumns = zones.map(zone => `${Math.max(1, Math.min(4, Math.ceil(zone.text.length / 8)))}fr`).join(' ');
+    bar.innerHTML = zones.map((zone, index) => {
+        const isWaiting = !statusBarZones && index === 0;
+        const justify = zone.align === 'center' ? 'center' : zone.align === 'right' ? 'end' : 'start';
+        const waiting = isWaiting ? `<span style="display:inline-block;width:10px;height:10px;margin-right:7px;border:2px solid #737373;border-top-color:#facc15;border-radius:999px;animation:vp-status-spin .8s linear infinite;vertical-align:-1px"></span>` : '';
+        return `<div class="vp-status-zone" style="text-align:${zone.align};justify-self:${justify};width:100%">${waiting}${escapeHtml(zone.text)}</div>`;
+    }).join('');
+}
+
+function escapeHtml(value: string): string {
+    return value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] || ch));
+}
+
+function updateStatusBarVisibility(): void {
+    renderStatusBar();
+    if (statusBarClockTimer !== null) { window.clearInterval(statusBarClockTimer); statusBarClockTimer = null; }
+    if (getStatusBarEnabled() && !statusBarZones) statusBarClockTimer = window.setInterval(renderStatusBar, 1000);
+}
+
+function setStatusBarPosition(position: StatusBarPosition, persist = true): void {
+    statusBarPosition = normalizeStatusBarPosition(position);
+    if (persist) saveSetting(STATUS_BAR_POSITION_KEY, statusBarPosition);
+    updateStatusBarVisibility();
+}
+
+export function setStatusBarZones(zones: StatusBarZone[]): void {
+    if (!getStatusBarEnabled()) return;
+    statusBarZones = zones.slice(0, 6).map(zone => ({ text: String(zone.text ?? ''), align: zone.align === 'center' || zone.align === 'right' ? zone.align : 'left' }));
+    updateStatusBarVisibility();
+}
+
+export function clearStatusBarData(): void {
+    statusBarZones = null;
+    updateStatusBarVisibility();
+}
+
+function updateStatusPositionButtons(position: StatusBarPosition): void {
+    document.querySelectorAll<HTMLButtonElement>('[data-status-bar-position]').forEach(button => {
+        const active = button.dataset.statusBarPosition === position;
+        button.style.backgroundColor = active ? '#FFBB00' : '';
+        button.style.color = active ? '#000000' : '';
+        button.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
 }
 
 function createModal(): HTMLElement {
@@ -176,9 +283,10 @@ function createModal(): HTMLElement {
                 <div><label for="remoteControlIpInput" class="block text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2">IP Address</label><input id="remoteControlIpInput" type="text" inputmode="decimal" autocomplete="off" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-base text-white focus:ring-2 focus:ring-[#FFBB00] focus:border-transparent outline-none transition-all" placeholder="127.0.0.1"></div>
                 <div><label for="remoteControlPortInput" class="block text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2">Port</label><input id="remoteControlPortInput" type="number" min="1" max="65535" step="1" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-base text-white focus:ring-2 focus:ring-[#FFBB00] focus:border-transparent outline-none transition-all" placeholder="8170"></div>
                 <div><label for="remoteControlApiKeyInput" class="block text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2">API Key</label><input id="remoteControlApiKeyInput" type="password" autocomplete="off" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-base text-white focus:ring-2 focus:ring-[#FFBB00] focus:border-transparent outline-none transition-all" placeholder="Optional"><p class="text-[10px] text-neutral-500 mt-1.5">Leave empty if authentication is disabled.</p></div>
+                <div class="pt-1"><div class="flex items-center justify-between"><span class="text-xs font-bold text-neutral-400 uppercase tracking-wider">Status Bar</span><div class="flex bg-neutral-800 border border-neutral-700 rounded-lg p-1 gap-1"><button type="button" data-status-bar-position="off" title="Status Bar Off" class="w-9 h-7 rounded text-xs text-neutral-300 hover:bg-neutral-700">○</button><button type="button" data-status-bar-position="top" title="Status Bar Top" class="w-9 h-7 rounded text-sm text-neutral-300 hover:bg-neutral-700">↑</button><button type="button" data-status-bar-position="bottom" title="Status Bar Bottom" class="w-9 h-7 rounded text-sm text-neutral-300 hover:bg-neutral-700">↓</button></div></div><p class="text-[10px] text-neutral-500 mt-1.5">Shown only while the WebSocket connection is active.</p></div>
                 <p id="remoteControlValidationError" class="hidden text-xs text-red-400"></p>
             </div>
-            <div class="flex gap-3 mt-6"><button id="remoteControlCancelBtn" type="button" class="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-white transition-colors border border-neutral-700">Cancel</button><button id="remoteControlSaveBtn" type="button" class="flex-1 px-4 py-2.5 bg-[#FFBB00] hover:bg-[#D9A000] rounded-lg text-sm font-semibold text-black transition-colors">Save</button></div>
+            <div class="flex gap-3 mt-6"><button id="remoteControlResetBtn" type="button" title="Reset Remote Control to defaults" class="w-11 px-3 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-300 transition-colors border border-neutral-700" aria-label="Reset Remote Control to defaults">↺</button><button id="remoteControlCancelBtn" type="button" class="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-white transition-colors border border-neutral-700">Cancel</button><button id="remoteControlSaveBtn" type="button" class="flex-1 px-4 py-2.5 bg-[#FFBB00] hover:bg-[#D9A000] rounded-lg text-sm font-semibold text-black transition-colors">Save</button></div>
         </div>`;
     document.body.appendChild(modal); setRemoteStatus(remoteStatus); return modal;
 }
@@ -212,18 +320,50 @@ function initGoogleDocRemember(): void {
 
 window.addEventListener('DOMContentLoaded', () => {
     initGoogleDocRemember(); if (document.getElementById('remoteControlSettingsRow')) return;
-    const row = createSettingsRow(); if (!row) return; const modal = createModal();
-    const toggle = document.getElementById('remoteControlToggle') as HTMLInputElement; const settingsBtn = document.getElementById('remoteControlSettingsBtn') as HTMLButtonElement; const ipInput = document.getElementById('remoteControlIpInput') as HTMLInputElement; const portInput = document.getElementById('remoteControlPortInput') as HTMLInputElement; const apiKeyInput = document.getElementById('remoteControlApiKeyInput') as HTMLInputElement; const saveBtn = document.getElementById('remoteControlSaveBtn') as HTMLButtonElement; const cancelBtn = document.getElementById('remoteControlCancelBtn') as HTMLButtonElement; const validationError = document.getElementById('remoteControlValidationError') as HTMLParagraphElement;
+    const row = createSettingsRow(); if (!row) return; const modal = createModal(); createStatusBar();
+    const toggle = document.getElementById('remoteControlToggle') as HTMLInputElement;
+    const settingsBtn = document.getElementById('remoteControlSettingsBtn') as HTMLButtonElement;
+    const ipInput = document.getElementById('remoteControlIpInput') as HTMLInputElement;
+    const portInput = document.getElementById('remoteControlPortInput') as HTMLInputElement;
+    const apiKeyInput = document.getElementById('remoteControlApiKeyInput') as HTMLInputElement;
+    const saveBtn = document.getElementById('remoteControlSaveBtn') as HTMLButtonElement;
+    const cancelBtn = document.getElementById('remoteControlCancelBtn') as HTMLButtonElement;
+    const resetBtn = document.getElementById('remoteControlResetBtn') as HTMLButtonElement;
+    const validationError = document.getElementById('remoteControlValidationError') as HTMLParagraphElement;
+    let pendingStatusBarPosition = statusBarPosition;
+
     toggle.checked = getEnabled(); setRemoteStatus(toggle.checked ? 'error' : 'disabled');
     const closeModal = () => modal.classList.add('hidden');
-    const openModal = () => { const settings = getConnectionSettings(); ipInput.value = settings.ip; portInput.value = String(settings.port); apiKeyInput.value = settings.apiKey; validationError.classList.add('hidden'); validationError.textContent = ''; setRemoteStatus(remoteStatus); modal.classList.remove('hidden'); ipInput.focus(); };
-    settingsBtn.addEventListener('click', openModal); cancelBtn.addEventListener('click', closeModal); modal.addEventListener('click', event => { if (event.target === modal) closeModal(); });
-    toggle.addEventListener('change', () => { setEnabled(toggle.checked); if (toggle.checked) connect(); else disconnect(); });
+    const openModal = () => {
+        const settings = getConnectionSettings();
+        ipInput.value = settings.ip; portInput.value = String(settings.port); apiKeyInput.value = settings.apiKey;
+        pendingStatusBarPosition = statusBarPosition; updateStatusPositionButtons(pendingStatusBarPosition);
+        validationError.classList.add('hidden'); validationError.textContent = ''; setRemoteStatus(remoteStatus); modal.classList.remove('hidden'); ipInput.focus();
+    };
+    settingsBtn.addEventListener('click', openModal);
+    cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', event => { if (event.target === modal) closeModal(); });
+    document.querySelectorAll<HTMLButtonElement>('[data-status-bar-position]').forEach(button => button.addEventListener('click', () => {
+        pendingStatusBarPosition = normalizeStatusBarPosition(button.dataset.statusBarPosition); updateStatusPositionButtons(pendingStatusBarPosition);
+    }));
+    resetBtn.addEventListener('click', () => {
+        ipInput.value = DEFAULT_IP; portInput.value = String(DEFAULT_PORT); apiKeyInput.value = '';
+        pendingStatusBarPosition = 'off'; updateStatusPositionButtons('off');
+    });
+    toggle.addEventListener('change', () => { setEnabled(toggle.checked); if (toggle.checked) connect(); else disconnect(); updateStatusBarVisibility(); });
     saveBtn.addEventListener('click', () => {
         const ip = ipInput.value.trim(), port = Number(portInput.value), apiKey = apiKeyInput.value.trim();
         if (!isValidIPv4(ip)) { validationError.textContent = 'Enter a valid IPv4 address, for example 127.0.0.1.'; validationError.classList.remove('hidden'); ipInput.focus(); return; }
         if (!Number.isInteger(port) || port < 1 || port > 65535) { validationError.textContent = 'Port must be a number from 1 to 65535.'; validationError.classList.remove('hidden'); portInput.focus(); return; }
-        saveSetting('remoteControlIp', ip); saveSetting('remoteControlPort', port); saveSetting('remoteControlApiKey', apiKey); closeModal(); if (getEnabled()) connect();
+        saveSetting('remoteControlIp', ip); saveSetting('remoteControlPort', port); saveSetting('remoteControlApiKey', apiKey);
+        setStatusBarPosition(pendingStatusBarPosition); if (pendingStatusBarPosition === 'off') clearStatusBarData();
+        closeModal(); if (getEnabled()) connect(); else updateStatusBarVisibility();
     });
+
+    const dockOpacityInput = document.getElementById('dockOpacityInput');
+    dockOpacityInput?.addEventListener('input', renderStatusBar);
+    window.addEventListener('voiceprompter:reset-defaults', () => { setStatusBarPosition('off'); clearStatusBarData(); });
+
+    updateStatusBarVisibility();
     if (getEnabled()) connect();
 });
