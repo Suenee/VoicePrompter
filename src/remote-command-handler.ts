@@ -1,6 +1,6 @@
 type JsonObject = Record<string, unknown>;
 type Sender = (message: JsonObject) => void;
-type PublicHandler = (args: JsonObject) => Promise<void>;
+type PublicHandler = (args: JsonObject) => Promise<JsonObject | void>;
 
 type PublicMethod =
     | 'goStart'
@@ -9,10 +9,17 @@ type PublicMethod =
     | 'goCurrent'
     | 'goNext'
     | 'markerNext'
-    | 'goFinish';
+    | 'goFinish'
+    | 'setStatusBarMode'
+    | 'getStatusBarMode'
+    | 'setStatusBarZoneCount'
+    | 'setStatusBarZone'
+    | 'clearStatusBar';
 
 type MessageType = 'call' | 'event' | 'progress' | 'response' | 'error';
 type RoutingName = 'vp' | 'bc' | 'server';
+type StatusBarMode = 'off' | 'top' | 'bottom';
+type StatusBarAlign = 'left' | 'center' | 'right';
 
 interface CallMessage extends JsonObject {
     protocolVersion: number;
@@ -35,7 +42,12 @@ export class RemoteCommandHandler {
         goCurrent: args => this.goCurrent(args),
         goNext: args => this.goNext(args),
         markerNext: args => this.markerNext(args),
-        goFinish: args => this.goFinish(args)
+        goFinish: args => this.goFinish(args),
+        setStatusBarMode: args => this.setStatusBarMode(args),
+        getStatusBarMode: args => this.getStatusBarMode(args),
+        setStatusBarZoneCount: args => this.setStatusBarZoneCount(args),
+        setStatusBarZone: args => this.setStatusBarZone(args),
+        clearStatusBar: args => this.clearStatusBar(args)
     };
 
     private readonly messageTypes = new Set<MessageType>(['call', 'event', 'progress', 'response', 'error']);
@@ -123,8 +135,49 @@ export class RemoteCommandHandler {
 
         const args = message.args as JsonObject;
         const keys = Object.keys(args);
-        if (method === 'goStart' || method === 'goFinish') {
+
+        if (
+            method === 'goStart' ||
+            method === 'goFinish' ||
+            method === 'getStatusBarMode' ||
+            method === 'clearStatusBar'
+        ) {
             if (keys.length !== 0) return `${method} does not accept arguments`;
+            return null;
+        }
+
+        if (method === 'setStatusBarMode') {
+            if (keys.length !== 1 || keys[0] !== 'mode') return 'setStatusBarMode accepts exactly the mode argument';
+            if (args.mode !== 'off' && args.mode !== 'top' && args.mode !== 'bottom') return 'setStatusBarMode.mode must be off, top or bottom';
+            return null;
+        }
+
+        if (method === 'setStatusBarZoneCount') {
+            if (keys.length !== 1 || keys[0] !== 'count') return 'setStatusBarZoneCount accepts exactly the count argument';
+            if (typeof args.count !== 'number' || !Number.isInteger(args.count) || args.count < 1 || args.count > 6) {
+                return 'setStatusBarZoneCount.count must be an integer from 1 through 6';
+            }
+            return null;
+        }
+
+        if (method === 'setStatusBarZone') {
+            if (
+                keys.length !== 3 ||
+                !keys.includes('index') ||
+                !keys.includes('text') ||
+                !keys.includes('align')
+            ) {
+                return 'setStatusBarZone accepts exactly index, text and align';
+            }
+
+            if (typeof args.index !== 'number' || !Number.isInteger(args.index) || args.index < 1 || args.index > 6) {
+                return 'setStatusBarZone.index must be an integer from 1 through 6';
+            }
+            if (typeof args.text !== 'string') return 'setStatusBarZone.text must be a string';
+            if ([...args.text].length > 1024) return 'setStatusBarZone.text must not exceed 1024 Unicode characters';
+            if (args.align !== 'left' && args.align !== 'center' && args.align !== 'right') {
+                return 'setStatusBarZone.align must be left, center or right';
+            }
             return null;
         }
 
@@ -151,7 +204,7 @@ export class RemoteCommandHandler {
         }
 
         try {
-            await handler(call.args);
+            const result = await handler(call.args);
             if (call.expectsResponse) {
                 this.send({
                     protocolVersion: 1,
@@ -160,7 +213,7 @@ export class RemoteCommandHandler {
                     type: 'response',
                     from: 'vp',
                     recipient: 'bc',
-                    result: { success: true },
+                    result: result ?? { success: true },
                     source: { app: 'VoicePrompter', version: 'devel' },
                     timestamp: new Date().toISOString()
                 });
@@ -274,6 +327,35 @@ export class RemoteCommandHandler {
         console.log('[VPP] goFinish()', args);
         const { goFinish } = await import('./navigation');
         goFinish();
+    }
+
+    public async setStatusBarMode(args: JsonObject): Promise<void> {
+        const { setStatusBarMode } = await import('./remote-control');
+        setStatusBarMode(args.mode as StatusBarMode);
+    }
+
+    public async getStatusBarMode(_args: JsonObject): Promise<JsonObject> {
+        const { getStatusBarMode } = await import('./remote-control');
+        return { mode: getStatusBarMode() };
+    }
+
+    public async setStatusBarZoneCount(args: JsonObject): Promise<void> {
+        const { setStatusBarZoneCount } = await import('./remote-control');
+        setStatusBarZoneCount(args.count as number);
+    }
+
+    public async setStatusBarZone(args: JsonObject): Promise<void> {
+        const { setStatusBarZone } = await import('./remote-control');
+        setStatusBarZone(
+            args.index as number,
+            args.text as string,
+            args.align as StatusBarAlign
+        );
+    }
+
+    public async clearStatusBar(_args: JsonObject): Promise<void> {
+        const { clearStatusBarData } = await import('./remote-control');
+        clearStatusBarData();
     }
 }
 
