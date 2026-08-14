@@ -10,6 +10,7 @@ const HEARTBEAT_GRACE_MS = 5000;
 const GDOC_REMEMBER_KEY = 'voiceprompter_gdoc_remember';
 const GDOC_REMEMBER_DAYS = 7;
 const STATUS_BAR_POSITION_KEY = 'statusBarPosition';
+const DEFAULT_STATUS_BAR_ZONE_COUNT = 2;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
@@ -22,8 +23,8 @@ let statusBarClockTimer: number | null = null;
 
 type JsonObject = Record<string, unknown>;
 type RemoteStatus = 'disabled' | 'error' | 'bridge-only' | 'connected';
-type StatusBarPosition = 'off' | 'top' | 'bottom';
-type StatusBarAlign = 'left' | 'center' | 'right';
+export type StatusBarPosition = 'off' | 'top' | 'bottom';
+export type StatusBarAlign = 'left' | 'center' | 'right';
 
 interface StatusBarZone {
     text: string;
@@ -61,7 +62,20 @@ const REMOTE_STATUS_PRESENTATION: Record<RemoteStatus, RemoteStatusPresentation>
 
 let remoteStatus: RemoteStatus = 'disabled';
 let statusBarPosition: StatusBarPosition = loadSetting(STATUS_BAR_POSITION_KEY, 'off') as StatusBarPosition;
-let statusBarZones: StatusBarZone[] | null = null;
+let statusBarZoneCount = DEFAULT_STATUS_BAR_ZONE_COUNT;
+let hasRemoteStatusBarData = false;
+let statusBarZones: StatusBarZone[] = createEmptyStatusBarZones();
+
+function createEmptyStatusBarZones(): StatusBarZone[] {
+    return Array.from({ length: 6 }, () => ({ text: '', align: 'left' as StatusBarAlign }));
+}
+
+function resetStatusBarSessionData(render = true): void {
+    statusBarZoneCount = DEFAULT_STATUS_BAR_ZONE_COUNT;
+    statusBarZones = createEmptyStatusBarZones();
+    hasRemoteStatusBarData = false;
+    if (render) updateStatusBarVisibility();
+}
 
 function normalizeStatusBarPosition(value: unknown): StatusBarPosition {
     return value === 'top' || value === 'bottom' ? value : 'off';
@@ -304,6 +318,7 @@ function handleServerPingResponse(message: JsonObject): boolean {
 
 function reconnectNow(): void {
     resetHeartbeatSession();
+    resetStatusBarSessionData(false);
     remoteCommandHandler.setSender(null);
 
     if (socket) {
@@ -331,6 +346,7 @@ function reconnectNow(): void {
 function disconnect(): void {
     clearReconnectTimer();
     resetHeartbeatSession();
+    resetStatusBarSessionData(false);
     remoteCommandHandler.setSender(null);
 
     if (socket) {
@@ -397,6 +413,7 @@ function connect(): void {
         socket.onclose = () => {
             socket = null;
             resetHeartbeatSession();
+            resetStatusBarSessionData(false);
             remoteCommandHandler.setSender(null);
             updateStatusBarVisibility();
 
@@ -480,29 +497,17 @@ function placeholderZones(): StatusBarZone[] {
     ];
 }
 
-function escapeHtml(value: string): string {
-    return value.replace(
-        /[&<>"']/g,
-        ch =>
-            ({
-                '&': '&amp;',
-                '<': '&lt;',
-                '>': '&gt;',
-                '"': '&quot;',
-                "'": '&#39;'
-            })[ch] || ch
-    );
-}
-
-function renderConnectionStatusIcon(): string {
+function createConnectionStatusIcon(): HTMLElement {
     const presentation = REMOTE_STATUS_PRESENTATION[remoteStatus];
-
-    return `<span
-        class="vp-status-connection"
-        title="${escapeHtml(presentation.title)}"
-        aria-label="${escapeHtml(presentation.title)}"
-        style="color:${presentation.color};font-weight:bold;margin-right:8px"
-    >${escapeHtml(presentation.icon)}</span>`;
+    const icon = document.createElement('span');
+    icon.className = 'vp-status-connection';
+    icon.title = presentation.title;
+    icon.setAttribute('aria-label', presentation.title);
+    icon.style.color = presentation.color;
+    icon.style.fontWeight = 'bold';
+    icon.style.marginRight = '8px';
+    icon.textContent = presentation.icon;
+    return icon;
 }
 
 function renderStatusBar(): void {
@@ -513,8 +518,8 @@ function renderStatusBar(): void {
 
     if (!enabled) return;
 
-    const zones = statusBarZones?.length
-        ? statusBarZones.slice(0, 6)
+    const zones = hasRemoteStatusBarData
+        ? statusBarZones.slice(0, statusBarZoneCount)
         : placeholderZones();
 
     bar.style.top = statusBarPosition === 'top' ? '0' : '';
@@ -531,32 +536,45 @@ function renderStatusBar(): void {
         .map(zone => `${Math.max(1, Math.min(4, Math.ceil(zone.text.length / 8)))}fr`)
         .join(' ');
 
-    bar.innerHTML = zones
-        .map((zone, index) => {
-            const isWaiting = !statusBarZones && index === 0;
-            const isPlaceholderClock = !statusBarZones && index === zones.length - 1;
+    bar.replaceChildren();
 
-            const justify =
-                zone.align === 'center'
-                    ? 'center'
-                    : zone.align === 'right'
-                        ? 'end'
-                        : 'start';
+    zones.forEach((zone, index) => {
+        const isWaiting = !hasRemoteStatusBarData && index === 0;
+        const isPlaceholderClock = !hasRemoteStatusBarData && index === zones.length - 1;
+        const justify =
+            zone.align === 'center'
+                ? 'center'
+                : zone.align === 'right'
+                    ? 'end'
+                    : 'start';
 
-            const waiting = isWaiting
-                ? `<span style="display:inline-block;width:10px;height:10px;margin-right:7px;border:2px solid #737373;border-top-color:#facc15;border-radius:999px;animation:vp-status-spin .8s linear infinite;vertical-align:-1px"></span>`
-                : '';
+        const zoneElement = document.createElement('div');
+        zoneElement.className = 'vp-status-zone';
+        zoneElement.style.textAlign = zone.align;
+        zoneElement.style.justifySelf = justify;
+        zoneElement.style.width = '100%';
 
-            const content = isPlaceholderClock
-                ? `${renderConnectionStatusIcon()}${escapeHtml(zone.text)}`
-                : escapeHtml(zone.text);
+        if (isWaiting) {
+            const waiting = document.createElement('span');
+            waiting.style.display = 'inline-block';
+            waiting.style.width = '10px';
+            waiting.style.height = '10px';
+            waiting.style.marginRight = '7px';
+            waiting.style.border = '2px solid #737373';
+            waiting.style.borderTopColor = '#facc15';
+            waiting.style.borderRadius = '999px';
+            waiting.style.animation = 'vp-status-spin .8s linear infinite';
+            waiting.style.verticalAlign = '-1px';
+            zoneElement.appendChild(waiting);
+        }
 
-            return `<div
-                class="vp-status-zone"
-                style="text-align:${zone.align};justify-self:${justify};width:100%"
-            >${waiting}${content}</div>`;
-        })
-        .join('');
+        if (isPlaceholderClock) {
+            zoneElement.appendChild(createConnectionStatusIcon());
+        }
+
+        zoneElement.appendChild(document.createTextNode(zone.text));
+        bar.appendChild(zoneElement);
+    });
 }
 
 function updateStatusBarVisibility(): void {
@@ -574,36 +592,96 @@ function updateStatusBarVisibility(): void {
     }
 }
 
+function emitStatusBarModeChanged(mode: StatusBarPosition): void {
+    if (socket?.readyState !== WebSocket.OPEN) return;
+
+    remoteCommandHandler.sendProtocolMessage({
+        protocolVersion: 1,
+        id: crypto.randomUUID(),
+        type: 'event',
+        from: 'vp',
+        recipient: 'bc',
+        event: 'statusBarModeChanged',
+        args: { mode },
+        expectsResponse: false,
+        source: { app: 'VoicePrompter', version: 'devel' },
+        timestamp: new Date().toISOString()
+    });
+}
+
 function setStatusBarPosition(
     position: StatusBarPosition,
     persist = true
 ): void {
-    statusBarPosition = normalizeStatusBarPosition(position);
+    const next = normalizeStatusBarPosition(position);
+    const changed = next !== statusBarPosition;
+    statusBarPosition = next;
 
     if (persist) {
         saveSetting(STATUS_BAR_POSITION_KEY, statusBarPosition);
     }
 
+    updateStatusPositionButtons(statusBarPosition);
+    updateStatusBarVisibility();
+
+    if (changed) emitStatusBarModeChanged(statusBarPosition);
+}
+
+export function getStatusBarMode(): StatusBarPosition {
+    return statusBarPosition;
+}
+
+export function setStatusBarMode(mode: StatusBarPosition): void {
+    setStatusBarPosition(mode);
+}
+
+export function setStatusBarZoneCount(count: number): void {
+    if (statusBarPosition === 'off') return;
+    if (!Number.isInteger(count) || count < 1 || count > 6) return;
+
+    statusBarZoneCount = count;
+    hasRemoteStatusBarData = true;
     updateStatusBarVisibility();
 }
 
+export function setStatusBarZone(
+    index: number,
+    text: string,
+    align: StatusBarAlign
+): void {
+    if (statusBarPosition === 'off') return;
+    if (!Number.isInteger(index) || index < 1 || index > 6) return;
+
+    statusBarZones[index - 1] = { text, align };
+    hasRemoteStatusBarData = true;
+    updateStatusBarVisibility();
+}
+
+// Legacy compatibility for older clients. VPM 0.9.4+ uses
+// setStatusBarZoneCount + setStatusBarZone instead.
 export function setStatusBarZones(zones: StatusBarZone[]): void {
-    if (!getStatusBarEnabled()) return;
+    if (statusBarPosition === 'off') return;
 
-    statusBarZones = zones.slice(0, 6).map(zone => ({
-        text: String(zone.text ?? ''),
-        align:
-            zone.align === 'center' || zone.align === 'right'
-                ? zone.align
-                : 'left'
-    }));
+    const limited = zones.slice(0, 6);
+    if (limited.length === 0) return;
 
+    statusBarZoneCount = limited.length;
+    limited.forEach((zone, index) => {
+        statusBarZones[index] = {
+            text: String(zone.text ?? ''),
+            align:
+                zone.align === 'center' || zone.align === 'right'
+                    ? zone.align
+                    : 'left'
+        };
+    });
+
+    hasRemoteStatusBarData = true;
     updateStatusBarVisibility();
 }
 
 export function clearStatusBarData(): void {
-    statusBarZones = null;
-    updateStatusBarVisibility();
+    resetStatusBarSessionData();
 }
 
 function updateStatusPositionButtons(position: StatusBarPosition): void {
@@ -1085,11 +1163,6 @@ window.addEventListener('DOMContentLoaded', () => {
         saveSetting('remoteControlApiKey', apiKey);
 
         setStatusBarPosition(pendingStatusBarPosition);
-
-        if (pendingStatusBarPosition === 'off') {
-            clearStatusBarData();
-        }
-
         closeModal();
 
         if (getEnabled()) {
