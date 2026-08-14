@@ -289,3 +289,13 @@ input[type=range]::-moz-range-track {
         border-left: 2px solid rgba(255, 255, 255, 0.1);
     }
 }
+
+/* Status Bar zone separators */
+#voicePrompterStatusBar .vp-status-zone {
+    box-sizing: border-box;
+    padding-inline: 10px;
+}
+
+#voicePrompterStatusBar .vp-status-zone + .vp-status-zone {
+    border-left: 1px solid rgba(255, 255, 255, 0.14);
+}
