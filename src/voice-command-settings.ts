@@ -80,8 +80,8 @@ function createModal(): HTMLElement {
             <div class="space-y-3">${rows}</div>
             <div class="flex items-center justify-end gap-3 mt-6">
                 <button id="voiceCommandsResetBtn" type="button" title="Reset to English defaults" class="h-10 w-10 flex items-center justify-center bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-300 hover:text-white border border-neutral-700 transition-colors" aria-label="Reset to English defaults"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg></button>
-                <button id="voiceCommandsCancelBtn" type="button" class="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-white border border-neutral-700 transition-colors">Cancel</button>
                 <button id="voiceCommandsSaveBtn" type="button" class="px-4 py-2.5 bg-[#FFBB00] hover:bg-[#D9A000] rounded-lg text-sm font-semibold text-black transition-colors">Save</button>
+                <button id="voiceCommandsCancelBtn" type="button" class="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-white border border-neutral-700 transition-colors">Cancel</button>
             </div>
         </div>`;
     document.body.appendChild(modal); return modal;
