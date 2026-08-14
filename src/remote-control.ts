@@ -73,6 +73,11 @@ function getStatusBarEnabled(): boolean {
     return statusBarPosition !== 'off' && getEnabled() && socket?.readyState === WebSocket.OPEN;
 }
 
+function isTeleprompterActive(): boolean {
+    const prompter = document.getElementById('prompterContainer');
+    return !!prompter && !prompter.classList.contains('hidden');
+}
+
 function setRemoteStatus(status: RemoteStatus): void {
     remoteStatus = status;
 
@@ -452,8 +457,8 @@ function createStatusBar(): HTMLElement {
     bar.className =
         'hidden fixed left-0 right-0 h-8 px-4 bg-neutral-900/95 border-neutral-700 text-neutral-200 text-xs font-mono items-center pointer-events-none select-none';
 
-    // Keep SR above the teleprompter text, but safely below controls/settings/modals.
-    bar.style.zIndex = '100';
+    // Settings panel is z-[9999]; SR always stays safely below application UI.
+    bar.style.zIndex = '50';
 
     document.body.appendChild(bar);
 
@@ -490,8 +495,6 @@ function escapeHtml(value: string): string {
 }
 
 function renderConnectionStatusIcon(): string {
-    // SR is hidden when Remote Control / WebSocket is unavailable,
-    // so "disabled" is normally never visible here.
     const presentation = REMOTE_STATUS_PRESENTATION[remoteStatus];
 
     return `<span
@@ -504,7 +507,7 @@ function renderConnectionStatusIcon(): string {
 
 function renderStatusBar(): void {
     const bar = createStatusBar();
-    const enabled = getStatusBarEnabled();
+    const enabled = getStatusBarEnabled() && isTeleprompterActive();
 
     bar.style.display = enabled ? 'grid' : 'none';
 
@@ -564,7 +567,9 @@ function updateStatusBarVisibility(): void {
         statusBarClockTimer = null;
     }
 
-    if (getStatusBarEnabled() && !statusBarZones) {
+    // Keep a lightweight refresh active while SR is configured and WS is alive.
+    // This also makes SR appear/disappear immediately after entering/leaving teleprompter mode.
+    if (getStatusBarEnabled()) {
         statusBarClockTimer = window.setInterval(renderStatusBar, 1000);
     }
 }
@@ -636,7 +641,7 @@ function createModal(): HTMLElement {
                 <div>
                     <label
                         for="remoteControlIpInput"
-                        class="block text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2"
+                        class="block text-xs font-bold text-neutral-400 mb-2"
                     >IP Address</label>
 
                     <input
@@ -652,7 +657,7 @@ function createModal(): HTMLElement {
                 <div>
                     <label
                         for="remoteControlPortInput"
-                        class="block text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2"
+                        class="block text-xs font-bold text-neutral-400 mb-2"
                     >Port</label>
 
                     <input
@@ -669,7 +674,7 @@ function createModal(): HTMLElement {
                 <div>
                     <label
                         for="remoteControlApiKeyInput"
-                        class="block text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2"
+                        class="block text-xs font-bold text-neutral-400 mb-2"
                     >API Key</label>
 
                     <input
@@ -687,7 +692,7 @@ function createModal(): HTMLElement {
 
                 <div class="pt-1">
                     <div class="flex items-center justify-between">
-                        <span class="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        <span class="text-xs font-bold text-neutral-400">
                             Status Bar
                         </span>
 
@@ -726,26 +731,26 @@ function createModal(): HTMLElement {
                 ></p>
             </div>
 
-            <div class="flex gap-3 mt-6">
+            <div class="flex items-center justify-end gap-3 mt-6">
                 <button
                     id="remoteControlResetBtn"
                     type="button"
                     title="Reset Remote Control to defaults"
-                    class="w-11 px-3 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-300 transition-colors border border-neutral-700"
+                    class="h-10 w-10 flex items-center justify-center bg-neutral-800 hover:bg-neutral-700 rounded-lg text-neutral-300 hover:text-white border border-neutral-700 transition-colors"
                     aria-label="Reset Remote Control to defaults"
                 >↺</button>
 
                 <button
-                    id="remoteControlCancelBtn"
-                    type="button"
-                    class="flex-1 px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-white transition-colors border border-neutral-700"
-                >Cancel</button>
-
-                <button
                     id="remoteControlSaveBtn"
                     type="button"
-                    class="flex-1 px-4 py-2.5 bg-[#FFBB00] hover:bg-[#D9A000] rounded-lg text-sm font-semibold text-black transition-colors"
+                    class="px-4 py-2.5 bg-[#FFBB00] hover:bg-[#D9A000] rounded-lg text-sm font-semibold text-black transition-colors"
                 >Save</button>
+
+                <button
+                    id="remoteControlCancelBtn"
+                    type="button"
+                    class="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-white border border-neutral-700 transition-colors"
+                >Cancel</button>
             </div>
         </div>
     `;
