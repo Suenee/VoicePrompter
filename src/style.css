@@ -293,6 +293,8 @@ input[type=range]::-moz-range-track {
 /* Status Bar zone separators */
 #voicePrompterStatusBar .vp-status-zone {
     box-sizing: border-box;
+    height: 100%;
+    line-height: 2rem;
     padding-inline: 10px;
 }
 
