@@ -1,3 +1,5 @@
+import { loadSetting } from './storage';
+
 const CHANNEL_NAME = 'voiceprompter-remote-control-owner';
 const TAKEOVER_NOTICE_ID = 'remoteControlTakeoverNotice';
 const windowId = crypto.randomUUID();
@@ -7,6 +9,8 @@ interface TakeoverMessage {
     type: 'takeover';
     ownerId: string;
 }
+
+type JsonObject = Record<string, unknown>;
 
 let managedSocket: WebSocket | null = null;
 let takenOver = false;
@@ -28,36 +32,58 @@ function isVpBridgeSocket(url: string | URL): boolean {
     }
 }
 
-function updateTakenOverStatus(): void {
+function updateRemoteControlStatus(
+    icon: string,
+    color: string,
+    title: string,
+    trackColor: string
+): void {
     const status = document.getElementById('remoteControlStatus');
     if (status) {
-        const title = 'Remote Control was taken over by another VoicePrompter window';
-        status.textContent = '▲';
-        status.style.color = '#ef4444';
+        status.textContent = icon;
+        status.style.color = color;
         status.title = title;
         status.setAttribute('aria-label', title);
     }
 
     const track = document.getElementById('remoteControlToggleTrack');
-    if (track) {
-        track.style.backgroundColor = '#ef4444';
-    }
+    if (track) track.style.backgroundColor = trackColor;
+}
+
+function updateTakenOverStatus(): void {
+    updateRemoteControlStatus(
+        '▲',
+        '#ef4444',
+        'Remote Control was taken over by another VoicePrompter window',
+        '#ef4444'
+    );
 }
 
 function updateDisconnectedStatus(): void {
-    const status = document.getElementById('remoteControlStatus');
-    if (status) {
-        const title = 'Remote Control is disconnected in this VoicePrompter window';
-        status.textContent = '○';
-        status.style.color = '#737373';
-        status.title = title;
-        status.setAttribute('aria-label', title);
-    }
+    updateRemoteControlStatus(
+        '○',
+        '#737373',
+        'Remote Control is disconnected in this VoicePrompter window',
+        '#404040'
+    );
+}
 
-    const track = document.getElementById('remoteControlToggleTrack');
-    if (track) {
-        track.style.backgroundColor = '#404040';
-    }
+function updatePeerDisconnectedStatus(): void {
+    updateRemoteControlStatus(
+        '▲',
+        '#facc15',
+        'Connected to VPBridge, but Bitfocus Companion intentionally disconnected',
+        '#FFBB00'
+    );
+}
+
+function updateServerDisconnectedStatus(reason: string): void {
+    updateRemoteControlStatus(
+        '▲',
+        '#ef4444',
+        `VPBridge is intentionally unavailable (${reason})`,
+        '#FFBB00'
+    );
 }
 
 function removeTakeoverNotice(): void {
@@ -258,8 +284,8 @@ function relinquishRemoteControl(): void {
         const current = managedSocket;
         managedSocket = null;
 
-        // Prevent remote-control.ts from treating this intentional takeover as
-        // a network failure and starting its automatic reconnect loop.
+        // A browser-window takeover is NOT a VPP disconnect. VPM must continue
+        // to regard VoicePrompter as available while the new owner connects.
         current.onclose = null;
         current.onerror = null;
 
@@ -272,6 +298,81 @@ function relinquishRemoteControl(): void {
 
     showTakeoverNotice();
     playTakeoverBeep();
+}
+
+function createDisconnectingEvent(reason: 'user'): JsonObject {
+    return {
+        protocolVersion: 1,
+        id: crypto.randomUUID(),
+        type: 'event',
+        from: 'vp',
+        recipient: 'bc',
+        event: 'disconnecting',
+        args: { reason },
+        expectsResponse: false,
+        source: {
+            app: 'VoicePrompter',
+            version: 'devel'
+        },
+        timestamp: new Date().toISOString()
+    };
+}
+
+function shouldAnnounceUserDisconnect(socket: WebSocket): boolean {
+    return (
+        socket === managedSocket &&
+        !takenOver &&
+        socket.readyState === NativeWebSocket.OPEN &&
+        loadSetting('remoteControlEnabled', false) === false
+    );
+}
+
+function handleDisconnectingMessage(event: MessageEvent): void {
+    if (typeof event.data !== 'string') return;
+
+    let message: JsonObject;
+    try {
+        const parsed = JSON.parse(event.data) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
+        message = parsed as JsonObject;
+    } catch {
+        return;
+    }
+
+    if (
+        message.protocolVersion !== 1 ||
+        message.type !== 'event' ||
+        message.recipient !== 'vp' ||
+        message.event !== 'disconnecting'
+    ) {
+        return;
+    }
+
+    const args = message.args;
+    const reason =
+        args && typeof args === 'object' && !Array.isArray(args) &&
+        typeof (args as JsonObject).reason === 'string'
+            ? String((args as JsonObject).reason)
+            : 'unknown';
+
+    if (message.from === 'bc' && reason === 'user') {
+        // Consume before remote-control.ts sees generic BC traffic and turns
+        // the indicator green again. The VPBridge socket itself stays alive.
+        event.stopImmediatePropagation();
+        updatePeerDisconnectedStatus();
+        startWaitingBar();
+        return;
+    }
+
+    if (
+        message.from === 'server' &&
+        (reason === 'shutdown' || reason === 'restart' || reason === 'exit')
+    ) {
+        event.stopImmediatePropagation();
+        updateServerDisconnectedStatus(reason);
+        startWaitingBar();
+        // Existing socket close/reconnect handling remains authoritative.
+    }
 }
 
 channel?.addEventListener('message', event => {
@@ -310,9 +411,22 @@ class CoordinatedWebSocket extends NativeWebSocket {
         channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage);
 
         managedSocket = this;
+        this.addEventListener('message', handleDisconnectingMessage, { capture: true });
         this.addEventListener('close', () => {
             if (managedSocket === this) managedSocket = null;
         });
+    }
+
+    close(code?: number, reason?: string): void {
+        if (shouldAnnounceUserDisconnect(this)) {
+            try {
+                this.send(JSON.stringify(createDisconnectingEvent('user')));
+            } catch {
+                // Graceful disconnect is best-effort and must never block close.
+            }
+        }
+
+        super.close(code, reason);
     }
 }
 
