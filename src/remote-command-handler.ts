@@ -156,8 +156,8 @@ export class RemoteCommandHandler {
 
         if (method === 'setStatusBarZoneCount') {
             if (keys.length !== 1 || keys[0] !== 'count') return 'setStatusBarZoneCount accepts exactly the count argument';
-            if (typeof args.count !== 'number' || !Number.isInteger(args.count) || args.count < 1 || args.count > 6) {
-                return 'setStatusBarZoneCount.count must be an integer from 1 through 6';
+            if (typeof args.count !== 'number' || !Number.isInteger(args.count) || args.count < 1) {
+                return 'setStatusBarZoneCount.count must be a positive integer';
             }
             return null;
         }
@@ -172,8 +172,8 @@ export class RemoteCommandHandler {
                 return 'setStatusBarZone accepts exactly index, text and align';
             }
 
-            if (typeof args.index !== 'number' || !Number.isInteger(args.index) || args.index < 1 || args.index > 6) {
-                return 'setStatusBarZone.index must be an integer from 1 through 6';
+            if (typeof args.index !== 'number' || !Number.isInteger(args.index) || args.index < 1) {
+                return 'setStatusBarZone.index must be a positive integer';
             }
             if (typeof args.text !== 'string') return 'setStatusBarZone.text must be a string';
             if ([...args.text].length > 1024) return 'setStatusBarZone.text must not exceed 1024 Unicode characters';
