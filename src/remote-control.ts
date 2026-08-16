@@ -10,7 +10,6 @@ const HEARTBEAT_GRACE_MS = 5000;
 const GDOC_REMEMBER_KEY = 'voiceprompter_gdoc_remember';
 const GDOC_REMEMBER_DAYS = 7;
 const STATUS_BAR_POSITION_KEY = 'statusBarPosition';
-const DEFAULT_STATUS_BAR_ZONE_COUNT = 2;
 
 let socket: WebSocket | null = null;
 let reconnectTimer: number | null = null;
@@ -62,18 +61,12 @@ const REMOTE_STATUS_PRESENTATION: Record<RemoteStatus, RemoteStatusPresentation>
 
 let remoteStatus: RemoteStatus = 'disabled';
 let statusBarPosition: StatusBarPosition = loadSetting(STATUS_BAR_POSITION_KEY, 'off') as StatusBarPosition;
-let statusBarZoneCount = DEFAULT_STATUS_BAR_ZONE_COUNT;
-let hasRemoteStatusBarData = false;
-let statusBarZones: StatusBarZone[] = createEmptyStatusBarZones();
-
-function createEmptyStatusBarZones(): StatusBarZone[] {
-    return Array.from({ length: 6 }, () => ({ text: '', align: 'left' as StatusBarAlign }));
-}
+let statusBarZoneCount: number | null = null;
+let statusBarZones: StatusBarZone[] = [];
 
 function resetStatusBarSessionData(render = true): void {
-    statusBarZoneCount = DEFAULT_STATUS_BAR_ZONE_COUNT;
-    statusBarZones = createEmptyStatusBarZones();
-    hasRemoteStatusBarData = false;
+    statusBarZoneCount = null;
+    statusBarZones = [];
     if (render) updateStatusBarVisibility();
 }
 
@@ -510,6 +503,17 @@ function createConnectionStatusIcon(): HTMLElement {
     return icon;
 }
 
+function getRenderedStatusBarZones(): StatusBarZone[] {
+    if (statusBarZoneCount === null) {
+        return placeholderZones();
+    }
+
+    return Array.from(
+        { length: statusBarZoneCount },
+        (_, index) => statusBarZones[index] ?? { text: '', align: 'left' }
+    );
+}
+
 function renderStatusBar(): void {
     const bar = createStatusBar();
     const enabled = getStatusBarEnabled() && isTeleprompterActive();
@@ -518,9 +522,8 @@ function renderStatusBar(): void {
 
     if (!enabled) return;
 
-    const zones = hasRemoteStatusBarData
-        ? statusBarZones.slice(0, statusBarZoneCount)
-        : placeholderZones();
+    const zones = getRenderedStatusBarZones();
+    const waitingForRemoteCount = statusBarZoneCount === null;
 
     bar.style.top = statusBarPosition === 'top' ? '0' : '';
     bar.style.bottom = statusBarPosition === 'bottom' ? '0' : '';
@@ -539,8 +542,8 @@ function renderStatusBar(): void {
     bar.replaceChildren();
 
     zones.forEach((zone, index) => {
-        const isWaiting = !hasRemoteStatusBarData && index === 0;
-        const isPlaceholderClock = !hasRemoteStatusBarData && index === zones.length - 1;
+        const isWaiting = waitingForRemoteCount && index === 0;
+        const isPlaceholderClock = waitingForRemoteCount && index === zones.length - 1;
         const justify =
             zone.align === 'center'
                 ? 'center'
@@ -637,10 +640,9 @@ export function setStatusBarMode(mode: StatusBarPosition): void {
 
 export function setStatusBarZoneCount(count: number): void {
     if (statusBarPosition === 'off') return;
-    if (!Number.isInteger(count) || count < 1 || count > 6) return;
+    if (!Number.isInteger(count) || count < 1) return;
 
     statusBarZoneCount = count;
-    hasRemoteStatusBarData = true;
     updateStatusBarVisibility();
 }
 
@@ -650,33 +652,9 @@ export function setStatusBarZone(
     align: StatusBarAlign
 ): void {
     if (statusBarPosition === 'off') return;
-    if (!Number.isInteger(index) || index < 1 || index > 6) return;
+    if (!Number.isInteger(index) || index < 1) return;
 
     statusBarZones[index - 1] = { text, align };
-    hasRemoteStatusBarData = true;
-    updateStatusBarVisibility();
-}
-
-// Legacy compatibility for older clients. VPM 0.9.4+ uses
-// setStatusBarZoneCount + setStatusBarZone instead.
-export function setStatusBarZones(zones: StatusBarZone[]): void {
-    if (statusBarPosition === 'off') return;
-
-    const limited = zones.slice(0, 6);
-    if (limited.length === 0) return;
-
-    statusBarZoneCount = limited.length;
-    limited.forEach((zone, index) => {
-        statusBarZones[index] = {
-            text: String(zone.text ?? ''),
-            align:
-                zone.align === 'center' || zone.align === 'right'
-                    ? zone.align
-                    : 'left'
-        };
-    });
-
-    hasRemoteStatusBarData = true;
     updateStatusBarVisibility();
 }
 
