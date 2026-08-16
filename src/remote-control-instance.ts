@@ -119,6 +119,12 @@ function startWaitingBar(): void {
     renderWaitingBar();
     waitingBarObserver?.disconnect();
     waitingBarObserver = new MutationObserver(() => {
+        if (
+            bar.children.length === 2 &&
+            bar.firstElementChild?.textContent?.includes('WAITING')
+        ) {
+            return;
+        }
         queueMicrotask(renderWaitingBar);
     });
     waitingBarObserver.observe(bar, {
