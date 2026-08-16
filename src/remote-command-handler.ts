@@ -1,3 +1,5 @@
+import './remote-control-instance';
+
 type JsonObject = Record<string, unknown>;
 type Sender = (message: JsonObject) => void;
 type PublicHandler = (args: JsonObject) => Promise<JsonObject | void>;
