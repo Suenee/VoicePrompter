@@ -5,6 +5,7 @@ let restartButtonOriginalHtml = '';
 let restartButtonOriginalClass = '';
 let restartButtonOriginalTitle = '';
 let restartButtonCaptured = false;
+let remoteConnected = false;
 
 function getRestartButton(): HTMLButtonElement | null {
     return document.getElementById('restartScriptBtn') as HTMLButtonElement | null;
@@ -34,6 +35,10 @@ function captureRestartButton(): HTMLButtonElement | null {
     return button;
 }
 
+function syncIconHtml(syncing: boolean): string {
+    return `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6${syncing ? ' animate-spin' : ''}" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>`;
+}
+
 function renderRestartButton(syncing = false): void {
     const button = captureRestartButton();
     if (!button) return;
@@ -48,13 +53,13 @@ function renderRestartButton(syncing = false): void {
         return;
     }
 
-    button.className = 'pointer-events-auto h-11 px-3 rounded-full bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/40 text-blue-300 hover:text-blue-200 transition-all flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-60 disabled:cursor-wait';
+    button.className = restartButtonOriginalClass;
+    button.classList.remove('text-neutral-400');
+    button.classList.add('text-[#FFBB00]');
     button.title = 'Resync Google Doc';
     button.setAttribute('aria-label', button.title);
     button.disabled = syncing;
-    button.innerHTML = syncing
-        ? `<svg class="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9" /></svg><span class="text-[10px] font-bold tracking-wide">SYNC</span>`
-        : `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg><span class="text-[10px] font-bold tracking-wide">SYNC</span>`;
+    button.innerHTML = syncIconHtml(syncing);
 }
 
 function reconcileGoogleDocSource(): void {
@@ -70,7 +75,6 @@ function reconcileGoogleDocSource(): void {
         return;
     }
 
-    // Internal reprocessing of the current script must never clear source metadata.
     if (activeGoogleDocUrl && isPrompterActive()) {
         state.googleDocUrl = activeGoogleDocUrl;
         document.getElementById('refreshGoogleDocContainer')?.classList.remove('hidden');
@@ -100,8 +104,22 @@ function runGoogleDocResync(): void {
     }, 100);
 }
 
-// Capture phase wins over the original restart click handler without changing
-// goStart/restartScript semantics used elsewhere in the app and VPP.
+function isRemoteControlConnected(): boolean {
+    const status = document.getElementById('remoteControlStatus');
+    if (!status) return false;
+    return status.textContent?.trim() === '✓' && status.title.startsWith('Connected:');
+}
+
+function reconcileRemoteConnection(): void {
+    const connectedNow = isRemoteControlConnected();
+
+    if (connectedNow && !remoteConnected) {
+        window.dispatchEvent(new CustomEvent('vp-resync-current-marker'));
+    }
+
+    remoteConnected = connectedNow;
+}
+
 document.addEventListener('click', event => {
     const target = event.target as Element | null;
     const restartButton = target?.closest('#restartScriptBtn');
@@ -112,9 +130,6 @@ document.addEventListener('click', event => {
     runGoogleDocResync();
 }, true);
 
-// Preserve the Google Doc source across current internal reprocessing paths
-// (for example Preserve Formatting), even though legacy loadScript(text)
-// currently assigns null to state.googleDocUrl.
 document.addEventListener('change', event => {
     const target = event.target as HTMLElement | null;
     if (target?.id !== 'preserveFormattingToggle' || !state.googleDocUrl) return;
@@ -134,11 +149,24 @@ function initializeGoogleDocSyncUi(): void {
     captureRestartButton();
     reconcileGoogleDocSource();
 
-    const observer = new MutationObserver(reconcileGoogleDocSource);
+    const uiObserver = new MutationObserver(reconcileGoogleDocSource);
     ['setupScreen', 'prompterContainer', 'refreshGoogleDocContainer'].forEach(id => {
         const element = document.getElementById(id);
-        if (element) observer.observe(element, { attributes: true, attributeFilter: ['class'] });
+        if (element) uiObserver.observe(element, { attributes: true, attributeFilter: ['class'] });
     });
+
+    const remoteStatus = document.getElementById('remoteControlStatus');
+    if (remoteStatus) {
+        remoteConnected = isRemoteControlConnected();
+        const remoteObserver = new MutationObserver(reconcileRemoteConnection);
+        remoteObserver.observe(remoteStatus, {
+            attributes: true,
+            attributeFilter: ['title'],
+            childList: true,
+            characterData: true,
+            subtree: true
+        });
+    }
 }
 
 if (document.readyState === 'loading') {
