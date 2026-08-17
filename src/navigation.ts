@@ -80,6 +80,29 @@ export function goPreviousCue(): void {
     if (previousCue >= 0) applyTarget(cueEnd(previousCue) + 1);
 }
 
+/**
+ * VPP markerBack semantics.
+ * offset 0 targets the current marker (the latest marker preceding or
+ * containing the current reading position); positive offsets walk farther
+ * backward from that marker. The target is always the first readable content
+ * after the selected marker.
+ */
+export function goMarkerBack(offset: number): void {
+    if (state.scriptWords.length === 0 || !Number.isInteger(offset) || offset < 0) return;
+
+    const cues: number[] = [];
+    for (let i = 0; i <= state.currentIndex && i < state.scriptWords.length; i++) {
+        if (!isCueStart(i)) continue;
+        cues.push(i);
+        i = cueEnd(i);
+    }
+
+    const targetCueIndex = cues.length - 1 - offset;
+    if (targetCueIndex < 0) return;
+
+    applyTarget(cueEnd(cues[targetCueIndex]) + 1);
+}
+
 export function goNextParagraph(): void { navigateParagraphs('forward', 1); }
 export function goFinish(): void {
     if (state.scriptWords.length === 0) return;
