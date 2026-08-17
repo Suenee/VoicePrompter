@@ -65,24 +65,6 @@ function updateDisconnectedStatus(): void {
     );
 }
 
-function updatePeerDisconnectedStatus(): void {
-    updateRemoteControlStatus(
-        '▲',
-        '#facc15',
-        'Connected to VPBridge, but Bitfocus Companion intentionally disconnected',
-        '#FFBB00'
-    );
-}
-
-function updateServerDisconnectedStatus(reason: string): void {
-    updateRemoteControlStatus(
-        '▲',
-        '#ef4444',
-        `VPBridge is intentionally unavailable (${reason})`,
-        '#FFBB00'
-    );
-}
-
 function removeTakeoverNotice(): void {
     document.getElementById(TAKEOVER_NOTICE_ID)?.remove();
 }
@@ -237,53 +219,6 @@ function shouldAnnounceUserDisconnect(socket: WebSocket): boolean {
     );
 }
 
-function handleDisconnectingMessage(event: MessageEvent): void {
-    if (typeof event.data !== 'string') return;
-
-    let message: JsonObject;
-    try {
-        const parsed = JSON.parse(event.data) as unknown;
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-        message = parsed as JsonObject;
-    } catch {
-        return;
-    }
-
-    if (
-        message.protocolVersion !== 1 ||
-        message.type !== 'event' ||
-        message.recipient !== 'vp' ||
-        message.event !== 'disconnecting'
-    ) {
-        return;
-    }
-
-    const args = message.args;
-    const reason =
-        args && typeof args === 'object' && !Array.isArray(args) &&
-        typeof (args as JsonObject).reason === 'string'
-            ? String((args as JsonObject).reason)
-            : 'unknown';
-
-    if (message.from === 'bc' && reason === 'user') {
-        // Consume before remote-control.ts sees generic BC traffic and turns
-        // the indicator green again. Status Bar rendering remains owned by
-        // remote-control.ts; this coordination layer must never overwrite it.
-        event.stopImmediatePropagation();
-        updatePeerDisconnectedStatus();
-        return;
-    }
-
-    if (
-        message.from === 'server' &&
-        (reason === 'shutdown' || reason === 'restart' || reason === 'exit')
-    ) {
-        event.stopImmediatePropagation();
-        updateServerDisconnectedStatus(reason);
-        // Existing socket close/reconnect handling remains authoritative.
-    }
-}
-
 channel?.addEventListener('message', event => {
     const message = event.data as Partial<TakeoverMessage> | null;
 
@@ -319,7 +254,6 @@ class CoordinatedWebSocket extends NativeWebSocket {
         channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage);
 
         managedSocket = this;
-        this.addEventListener('message', handleDisconnectingMessage, { capture: true });
         this.addEventListener('close', () => {
             if (managedSocket === this) managedSocket = null;
         });
