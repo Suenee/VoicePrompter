@@ -41,8 +41,8 @@ export class RemoteEventHooks {
         });
     }
 
-    public HookWordChanged(word: string): void {
-        if (word === this.lastWord) return;
+    public HookWordChanged(word: string, force = false): void {
+        if (!force && word === this.lastWord) return;
         this.lastWord = word;
 
         remoteCommandHandler.sendProtocolMessage({
@@ -57,6 +57,12 @@ export class RemoteEventHooks {
             source: { app: 'VoicePrompter', version: 'devel' },
             timestamp: new Date().toISOString()
         });
+    }
+
+    public SyncCurrentWord(): void {
+        const current = state.scriptWords[state.currentIndex];
+        if (!current || current.skip || current.isBreak || current.isStop) return;
+        this.HookWordChanged(current.word, true);
     }
 
     public SyncCurrentMarker(): void {
@@ -219,4 +225,5 @@ export const remoteEventHooks = new RemoteEventHooks();
 
 window.addEventListener('vp-resync-current-marker', () => {
     remoteEventHooks.SyncCurrentMarker();
+    remoteEventHooks.SyncCurrentWord();
 });
