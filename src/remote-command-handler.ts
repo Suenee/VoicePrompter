@@ -14,6 +14,17 @@ type PublicMethod =
     | 'goNext'
     | 'markerNext'
     | 'goFinish'
+    | 'setMicrophone'
+    | 'setFontSize'
+    | 'adjustFontSize'
+    | 'setVoiceCommands'
+    | 'setRotateScreen'
+    | 'setAlignment'
+    | 'setMirrorMode'
+    | 'setRecordingDockOpacity'
+    | 'adjustRecordingDockOpacity'
+    | 'syncGoogleDoc'
+    | 'setGoogleDocUrl'
     | 'setStatusBarMode'
     | 'getStatusBarMode'
     | 'setStatusBarZoneCount'
@@ -24,6 +35,7 @@ type MessageType = 'call' | 'event' | 'progress' | 'response' | 'error';
 type RoutingName = 'vp' | 'bc' | 'server';
 type StatusBarMode = 'off' | 'top' | 'bottom';
 type StatusBarAlign = 'left' | 'center' | 'right';
+type ToggleState = 'on' | 'off' | 'toggle';
 
 interface CallMessage extends JsonObject {
     protocolVersion: number;
@@ -47,6 +59,17 @@ export class RemoteCommandHandler {
         goNext: args => this.goNext(args),
         markerNext: args => this.markerNext(args),
         goFinish: args => this.goFinish(args),
+        setMicrophone: args => this.setMicrophone(args),
+        setFontSize: args => this.setFontSize(args),
+        adjustFontSize: args => this.adjustFontSize(args),
+        setVoiceCommands: args => this.setVoiceCommands(args),
+        setRotateScreen: args => this.setRotateScreen(args),
+        setAlignment: args => this.setAlignment(args),
+        setMirrorMode: args => this.setMirrorMode(args),
+        setRecordingDockOpacity: args => this.setRecordingDockOpacity(args),
+        adjustRecordingDockOpacity: args => this.adjustRecordingDockOpacity(args),
+        syncGoogleDoc: args => this.syncGoogleDoc(args),
+        setGoogleDocUrl: args => this.setGoogleDocUrl(args),
         setStatusBarMode: args => this.setStatusBarMode(args),
         getStatusBarMode: args => this.getStatusBarMode(args),
         setStatusBarZoneCount: args => this.setStatusBarZoneCount(args),
@@ -129,6 +152,22 @@ export class RemoteCommandHandler {
         return null;
     }
 
+    private validateToggleState(args: JsonObject, method: string): string | null {
+        const keys = Object.keys(args);
+        if (keys.length !== 1 || keys[0] !== 'state') return `${method} accepts exactly the state argument`;
+        if (args.state !== 'on' && args.state !== 'off' && args.state !== 'toggle') return `${method}.state must be on, off or toggle`;
+        return null;
+    }
+
+    private isGoogleDocUrl(value: string): boolean {
+        try {
+            const url = new URL(value);
+            return url.protocol === 'https:' && url.hostname === 'docs.google.com' && url.pathname.startsWith('/document/');
+        } catch {
+            return false;
+        }
+    }
+
     private validateCall(message: JsonObject): string | null {
         if (message.from !== 'bc') return 'application calls to vp must come from bc';
         if (typeof message.method !== 'string' || message.method.trim() === '') return 'call.method must be a non-empty string';
@@ -143,10 +182,57 @@ export class RemoteCommandHandler {
         if (
             method === 'goStart' ||
             method === 'goFinish' ||
+            method === 'syncGoogleDoc' ||
             method === 'getStatusBarMode' ||
             method === 'clearStatusBar'
         ) {
             if (keys.length !== 0) return `${method} does not accept arguments`;
+            return null;
+        }
+
+        if (
+            method === 'setMicrophone' ||
+            method === 'setVoiceCommands' ||
+            method === 'setRotateScreen' ||
+            method === 'setMirrorMode'
+        ) {
+            return this.validateToggleState(args, method);
+        }
+
+        if (method === 'setFontSize') {
+            if (keys.length !== 1 || keys[0] !== 'size') return 'setFontSize accepts exactly the size argument';
+            if (typeof args.size !== 'number' || !Number.isInteger(args.size) || args.size < 20 || args.size > 100) return 'setFontSize.size must be an integer from 20 through 100';
+            return null;
+        }
+
+        if (method === 'adjustFontSize') {
+            if (keys.length !== 1 || keys[0] !== 'delta') return 'adjustFontSize accepts exactly the delta argument';
+            if (typeof args.delta !== 'number' || !Number.isFinite(args.delta) || !Number.isInteger(args.delta)) return 'adjustFontSize.delta must be a finite integer';
+            return null;
+        }
+
+        if (method === 'setAlignment') {
+            if (keys.length !== 1 || keys[0] !== 'align') return 'setAlignment accepts exactly the align argument';
+            if (args.align !== 'left' && args.align !== 'center' && args.align !== 'right') return 'setAlignment.align must be left, center or right';
+            return null;
+        }
+
+        if (method === 'setRecordingDockOpacity') {
+            if (keys.length !== 1 || keys[0] !== 'opacity') return 'setRecordingDockOpacity accepts exactly the opacity argument';
+            if (typeof args.opacity !== 'number' || !Number.isInteger(args.opacity) || args.opacity < 30 || args.opacity > 100) return 'setRecordingDockOpacity.opacity must be an integer from 30 through 100';
+            return null;
+        }
+
+        if (method === 'adjustRecordingDockOpacity') {
+            if (keys.length !== 1 || keys[0] !== 'delta') return 'adjustRecordingDockOpacity accepts exactly the delta argument';
+            if (typeof args.delta !== 'number' || !Number.isFinite(args.delta) || !Number.isInteger(args.delta)) return 'adjustRecordingDockOpacity.delta must be a finite integer';
+            return null;
+        }
+
+        if (method === 'setGoogleDocUrl') {
+            if (keys.length !== 1 || keys[0] !== 'url') return 'setGoogleDocUrl accepts exactly the url argument';
+            if (typeof args.url !== 'string' || args.url.trim() === '') return 'setGoogleDocUrl.url must be a non-empty string';
+            if (!this.isGoogleDocUrl(args.url)) return 'setGoogleDocUrl.url must be an absolute HTTPS docs.google.com/document/... URL';
             return null;
         }
 
@@ -334,6 +420,61 @@ export class RemoteCommandHandler {
         console.log('[VPP] goFinish()', args);
         const { goFinish } = await import('./navigation');
         goFinish();
+    }
+
+    public async setMicrophone(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setMicrophoneState(args.state as ToggleState);
+    }
+
+    public async setFontSize(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setFontSizePx(args.size as number);
+    }
+
+    public async adjustFontSize(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.adjustFontSizePx(args.delta as number);
+    }
+
+    public async setVoiceCommands(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setVoiceCommandsState(args.state as ToggleState);
+    }
+
+    public async setRotateScreen(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setRotateScreenState(args.state as ToggleState);
+    }
+
+    public async setAlignment(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setAlignment(args.align as StatusBarAlign);
+    }
+
+    public async setMirrorMode(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setMirrorModeState(args.state as ToggleState);
+    }
+
+    public async setRecordingDockOpacity(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setRecordingDockOpacity(args.opacity as number);
+    }
+
+    public async adjustRecordingDockOpacity(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.adjustRecordingDockOpacity(args.delta as number);
+    }
+
+    public async syncGoogleDoc(_args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        await controls.syncGoogleDoc();
+    }
+
+    public async setGoogleDocUrl(args: JsonObject): Promise<void> {
+        const controls = await import('./remote-vpp-controls');
+        controls.setGoogleDocUrl((args.url as string).trim());
     }
 
     public async setStatusBarMode(args: JsonObject): Promise<void> {
