@@ -22,11 +22,18 @@ if defined VP_DEV_PID (
     echo [VoicePrompter] Other Node processes will not be touched.
 )
 
+echo [VoicePrompter] Checking local working tree...
+git diff --quiet || goto :dirty
+git diff --cached --quiet || goto :dirty
+
 echo [VoicePrompter] Switching to devel...
 git checkout devel || goto :error
 
-echo [VoicePrompter] Pulling latest changes...
-git pull --ff-only || goto :error
+echo [VoicePrompter] Fetching latest devel from origin...
+git fetch origin devel || goto :error
+
+echo [VoicePrompter] Synchronizing local devel with origin/devel...
+git reset --hard origin/devel || goto :error
 
 echo [VoicePrompter] Installing dependencies...
 call npm install || goto :error
@@ -49,6 +56,13 @@ if "%VP_DEV_WAS_RUNNING%"=="1" (
 echo.
 echo [VoicePrompter] Upgrade completed successfully.
 exit /b 0
+
+:dirty
+echo.
+echo ERROR: Local uncommitted changes were found.
+echo [VoicePrompter] Upgrade stopped to avoid overwriting your work.
+echo [VoicePrompter] Commit, stash, or discard the local changes and run upgrade.cmd again.
+goto :error
 
 :error
 if "%VP_DEV_WAS_RUNNING%"=="1" (
