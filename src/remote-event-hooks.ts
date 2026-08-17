@@ -14,6 +14,8 @@ interface MarkerHookArgs {
 }
 
 export class RemoteEventHooks {
+    private lastWord = '';
+
     public HookMarker(args: MarkerHookArgs): void {
         const marker = String(args?.marker ?? args?.text ?? '').trim();
         if (!marker) return;
@@ -34,6 +36,24 @@ export class RemoteEventHooks {
             command: parsed.command,
             args: parsed.args,
             expectsResponse: true,
+            source: { app: 'VoicePrompter', version: 'devel' },
+            timestamp: new Date().toISOString()
+        });
+    }
+
+    public HookWordChanged(word: string): void {
+        if (word === this.lastWord) return;
+        this.lastWord = word;
+
+        remoteCommandHandler.sendProtocolMessage({
+            protocolVersion: 1,
+            id: crypto.randomUUID(),
+            type: 'event',
+            from: 'vp',
+            recipient: 'bc',
+            event: 'wordChanged',
+            args: { word },
+            expectsResponse: false,
             source: { app: 'VoicePrompter', version: 'devel' },
             timestamp: new Date().toISOString()
         });
