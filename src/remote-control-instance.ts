@@ -10,6 +10,11 @@ interface TakeoverMessage {
     ownerId: string;
 }
 
+interface DisconnectingDetail {
+    from: 'bc' | 'server';
+    reason: string;
+}
+
 type JsonObject = Record<string, unknown>;
 
 let managedSocket: WebSocket | null = null;
@@ -62,6 +67,24 @@ function updateDisconnectedStatus(): void {
         '#737373',
         'Remote Control is disconnected in this VoicePrompter window',
         '#404040'
+    );
+}
+
+function updatePeerDisconnectedStatus(): void {
+    updateRemoteControlStatus(
+        '▲',
+        '#facc15',
+        'Connected to VPBridge, but Bitfocus Companion intentionally disconnected',
+        '#FFBB00'
+    );
+}
+
+function updateServerDisconnectedStatus(reason: string): void {
+    updateRemoteControlStatus(
+        '▲',
+        '#ef4444',
+        `VPBridge is intentionally unavailable (${reason})`,
+        '#FFBB00'
     );
 }
 
@@ -218,6 +241,23 @@ function shouldAnnounceUserDisconnect(socket: WebSocket): boolean {
         loadSetting('remoteControlEnabled', false) === false
     );
 }
+
+window.addEventListener('vp-vpp-disconnecting', event => {
+    const detail = (event as CustomEvent<DisconnectingDetail>).detail;
+    if (!detail) return;
+
+    if (detail.from === 'bc' && detail.reason === 'user') {
+        updatePeerDisconnectedStatus();
+        return;
+    }
+
+    if (
+        detail.from === 'server' &&
+        (detail.reason === 'shutdown' || detail.reason === 'restart' || detail.reason === 'exit')
+    ) {
+        updateServerDisconnectedStatus(detail.reason);
+    }
+});
 
 channel?.addEventListener('message', event => {
     const message = event.data as Partial<TakeoverMessage> | null;
