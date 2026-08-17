@@ -4,12 +4,12 @@ import { registerSW } from 'virtual:pwa-register';
 import { initElements, els } from './elements';
 import { state } from './state';
 import './remote-control';
-import { renderScript, updateHighlight, scrollToCurrent, applySettings, renderHistoryList, restartScript } from './render';
+import { renderScript, updateHighlight, scrollToCurrent, applySettings, renderHistoryList, restartScript, updateMicUI } from './render';
 import { initSpeech, startListening, stopListening } from './speech';
 import { autoScrollManager } from './autoscroll';
-import { saveToHistory, getHistory, clearAllHistory, loadSetting, saveSetting } from './storage';
+import { saveToHistory, getHistory, loadSetting, saveSetting } from './storage';
 import { ScriptWord, ScrollingMode } from './types';
-import { enterVideoMode, exitVideoMode, toggleVideoLayout, startRecording, stopRecording, flipCamera, getMediaConstraints } from './video';
+import { enterVideoMode, exitVideoMode, toggleVideoLayout, startRecording, stopRecording, flipCamera } from './video';
 import { detectAll } from 'tinyld/light';
 import { fetchGoogleDocText } from './gdoc';
 import { enumerateAndPopulateDevices } from './devices';
@@ -87,22 +87,18 @@ function renderLanguageDropdowns() {
                             <span class="text-[10px] text-neutral-500 auto-detected-label ml-2 truncate"></span>
                         </div>
                     </button>
-                    
                     <div class="px-3 py-1 mt-1 flex items-center justify-between">
                         <span class="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">With Auto-Detection</span>
                     </div>
-                    
                     ${AUTO_LANGS.map(lang => `
                         <button class="w-full text-left px-3 py-1.5 hover:bg-neutral-800 transition-colors flex items-center justify-between lang-option" data-value="${lang.id}">
                             <span class="text-sm text-neutral-300">${lang.name}</span>
                             <span class="text-[9px] font-bold bg-[#FFBB00]/10 text-[#FFBB00] px-1.5 py-0.5 rounded-full tracking-wider">AUTO</span>
                         </button>
                     `).join('')}
-
                     <div class="px-3 py-1 mt-2 flex items-center justify-between border-t border-neutral-800 pt-2">
                         <span class="text-[10px] uppercase font-bold text-neutral-500 tracking-wider">Manual Selection</span>
                     </div>
-
                     ${MANUAL_LANGS.map(lang => `
                         <button class="w-full text-left px-3 py-1.5 hover:bg-neutral-800 transition-colors flex items-center justify-between lang-option" data-value="${lang.id}">
                             <span class="text-sm text-neutral-300">${lang.name}</span>
@@ -120,36 +116,28 @@ function renderLanguageDropdowns() {
             e.preventDefault();
             e.stopPropagation();
             const isOpen = !menu.classList.contains('opacity-0');
-
             document.querySelectorAll('.dropdown-menu').forEach(m => {
                 m.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
                 const btn = m.previousElementSibling as HTMLButtonElement;
                 if (btn) btn.querySelector('svg')?.classList.remove('rotate-180');
             });
-
             if (!isOpen) {
                 menu.classList.remove('opacity-0', 'scale-95', 'pointer-events-none');
                 svg.classList.add('rotate-180');
                 const rect = menu.getBoundingClientRect();
                 if (rect.bottom > window.innerHeight) {
-                    menu.style.bottom = '100%';
-                    menu.style.top = 'auto';
-                    menu.style.marginBottom = '0.5rem';
+                    menu.style.bottom = '100%'; menu.style.top = 'auto'; menu.style.marginBottom = '0.5rem';
                 } else {
-                    menu.style.bottom = 'auto';
-                    menu.style.top = '100%';
-                    menu.style.marginBottom = '0';
+                    menu.style.bottom = 'auto'; menu.style.top = '100%'; menu.style.marginBottom = '0';
                 }
             }
         });
 
-        const options = menu.querySelectorAll('.lang-option');
-        options.forEach(opt => {
+        menu.querySelectorAll('.lang-option').forEach(opt => {
             opt.addEventListener('click', (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                const val = (opt as HTMLButtonElement).dataset.value!;
-                handleLanguageChange(val);
+                handleLanguageChange((opt as HTMLButtonElement).dataset.value!);
                 menu.classList.add('opacity-0', 'scale-95', 'pointer-events-none');
                 svg.classList.remove('rotate-180');
             });
@@ -227,7 +215,7 @@ function loadScript(text: string, googleDocUrl: string | null = null): void {
         const top = results[0];
         const confidence = top?.accuracy ?? 0;
         const detection = top?.lang ?? '';
-        let mappedLang = LANG_MAP[detection] || 'en-US';
+        const mappedLang = LANG_MAP[detection] || 'en-US';
         state.detectedLanguage = mappedLang;
         targetLang = mappedLang;
         updateAutoDetectText(mappedLang);
@@ -249,7 +237,7 @@ function loadScript(text: string, googleDocUrl: string | null = null): void {
         if (word.includes('[')) inBracket = true;
         const shouldSkip = inBracket || /[\u{1F300}-\u{1F9FF}]/u.test(word);
         if (word.includes(']')) inBracket = false;
-        const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+        const cleanWord = word.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
         return { word, clean: cleanWord, element: null, skip: shouldSkip, isStop: false } as ScriptWord;
     });
     renderScript();
@@ -309,8 +297,10 @@ els.micButton.addEventListener('click', async () => {
     }
     if (state.config.scrollingMode === 'voice') { startListening(); return; }
     isAutoScrollStarting = true;
-    try { await autoScrollManager.start(); if (autoScrollManager.isRunning()) { state.isListening = true; updateMicUI(true); } }
-    finally { isAutoScrollStarting = false; }
+    try {
+        const started = await autoScrollManager.start();
+        if (started) { state.isListening = true; updateMicUI(true); }
+    } finally { isAutoScrollStarting = false; }
 });
 
 els.resetAppBtn.addEventListener('click', resetApp);
@@ -372,7 +362,23 @@ els.fontFamilyBtns.serif.addEventListener('click', () => { state.config.fontFami
 els.fontFamilyBtns.comicSans.addEventListener('click', () => { state.config.fontFamily = 'comicSans'; applySettings(); });
 els.fontFamilyBtns.openDyslexic.addEventListener('click', () => { state.config.fontFamily = 'openDyslexic'; applySettings(); });
 
-els.scrollingModeSelect.addEventListener('change', (e) => { const mode = (e.target as HTMLSelectElement).value as ScrollingMode; if (state.isListening) { if (state.config.scrollingMode === 'voice') stopListening(); else { autoScrollManager.stop(); state.isListening = false; updateMicUI(false); } } state.config.scrollingMode = mode; els.scrollSpeedContainer.classList.toggle('hidden', mode !== 'auto'); els.soundSensitivityContainer.classList.toggle('hidden', mode !== 'sound'); const descriptions: Record<ScrollingMode, string> = { voice: 'Scrolls as you speak, matching words in real-time.', auto: 'Scrolls automatically at a constant speed.', sound: 'Scrolls when sound is detected from the microphone.' }; els.scrollingModeDescription.textContent = descriptions[mode]; updateMicUI(false); });
+els.scrollingModeSelect.addEventListener('change', (e) => {
+    const mode = (e.target as HTMLSelectElement).value as ScrollingMode;
+    if (state.isListening) {
+        if (state.config.scrollingMode === 'voice') stopListening();
+        else { autoScrollManager.stop(); state.isListening = false; updateMicUI(false); }
+    }
+    state.config.scrollingMode = mode;
+    els.scrollSpeedContainer.classList.toggle('hidden', mode !== 'constant');
+    els.soundSensitivityContainer.classList.toggle('hidden', mode !== 'sound');
+    const descriptions: Record<ScrollingMode, string> = {
+        voice: 'Scrolls as you speak, matching words in real-time.',
+        constant: 'Scrolls automatically at a constant speed.',
+        sound: 'Scrolls when sound is detected from the microphone.'
+    };
+    els.scrollingModeDescription.textContent = descriptions[mode];
+    updateMicUI(false);
+});
 
 els.dismissWarningBtn.addEventListener('click', () => els.browserWarning.classList.add('hidden'));
 els.dismissIpadWarningBtn.addEventListener('click', () => els.ipadPwaWarning.classList.add('hidden'));
@@ -399,7 +405,9 @@ function initializeUI(): void {
     els.soundSensitivityVal.textContent = `${Math.round(state.config.soundSensitivity * 100)}%`; els.soundSensitivityInput.value = state.config.soundSensitivity.toString();
     els.textColorInput.value = state.config.textColor; els.bgColorInput.value = state.config.bgColor;
     els.scriptContent.style.fontSize = `${state.config.fontSize}px`; els.scriptContent.style.paddingLeft = `${state.config.margin}%`; els.scriptContent.style.paddingRight = `${state.config.margin}%`;
-    els.scrollingModeSelect.value = state.config.scrollingMode; els.scrollSpeedContainer.classList.toggle('hidden', state.config.scrollingMode !== 'auto'); els.soundSensitivityContainer.classList.toggle('hidden', state.config.scrollingMode !== 'sound');
+    els.scrollingModeSelect.value = state.config.scrollingMode;
+    els.scrollSpeedContainer.classList.toggle('hidden', state.config.scrollingMode !== 'constant');
+    els.soundSensitivityContainer.classList.toggle('hidden', state.config.scrollingMode !== 'sound');
     els.voiceCommandToggle.checked = state.config.voiceCommandsEnabled; els.stopSignToggle.checked = state.config.showStopIcon;
     els.screenRotationToggle.checked = state.isScreenRotated; document.body.classList.toggle('screen-rotated', state.isScreenRotated);
     els.mirrorToggle.checked = state.isMirrored; els.scrollContainer.classList.toggle('mirror-mode', state.isMirrored);
