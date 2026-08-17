@@ -88,25 +88,58 @@ function reconcileGoogleDocSource(): void {
     renderRestartButton();
 }
 
-function runGoogleDocResync(): void {
-    if (!state.googleDocUrl) return;
+export function setGoogleDocSourceUrl(url: string): void {
+    state.googleDocUrl = url;
+    activeGoogleDocUrl = url;
 
-    const settingsSync = document.getElementById('refreshGoogleDocBtn') as HTMLButtonElement | null;
-    if (!settingsSync) {
-        console.warn('[GoogleDoc] Resync button is unavailable');
-        return;
+    const input = document.getElementById('googleDocUrlInput') as HTMLInputElement | null;
+    if (input) input.value = url;
+
+    if (isPrompterActive()) {
+        document.getElementById('refreshGoogleDocContainer')?.classList.remove('hidden');
     }
 
+    renderRestartButton();
+}
+
+export async function syncGoogleDocNow(): Promise<void> {
+    if (!state.googleDocUrl) throw new Error('No Google Docs source is configured');
+
+    const settingsSync = document.getElementById('refreshGoogleDocBtn') as HTMLButtonElement | null;
+    if (!settingsSync) throw new Error('Google Docs synchronization control is unavailable');
+    if (settingsSync.disabled) throw new Error('Google Docs synchronization is already running');
+
     renderRestartButton(true);
+    const startedAt = Date.now();
     settingsSync.click();
 
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-        if (!settingsSync.disabled || Date.now() - startedAt > 15000) {
-            window.clearInterval(timer);
-            reconcileGoogleDocSource();
-        }
-    }, 100);
+    try {
+        await new Promise<void>((resolve, reject) => {
+            const timer = window.setInterval(() => {
+                const elapsed = Date.now() - startedAt;
+                const label = settingsSync.textContent?.trim() ?? '';
+
+                if (label === 'Synced!') {
+                    window.clearInterval(timer);
+                    resolve();
+                    return;
+                }
+
+                if (!settingsSync.disabled && elapsed > 100) {
+                    window.clearInterval(timer);
+                    reject(new Error('Google Docs synchronization failed'));
+                    return;
+                }
+
+                if (elapsed > 20000) {
+                    window.clearInterval(timer);
+                    reject(new Error('Google Docs synchronization timed out'));
+                }
+            }, 50);
+        });
+    } finally {
+        reconcileGoogleDocSource();
+    }
 }
 
 function isRemoteControlConnected(): boolean {
@@ -184,7 +217,9 @@ document.addEventListener('click', event => {
 
     event.preventDefault();
     event.stopImmediatePropagation();
-    runGoogleDocResync();
+    void syncGoogleDocNow().catch(() => {
+        // The existing local refresh handler already presents the failure.
+    });
 }, true);
 
 // Preserve the Google Doc source across current internal reprocessing paths
