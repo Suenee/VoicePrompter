@@ -272,12 +272,15 @@ export class RemoteCommandHandler {
     public async markerBack(args: JsonObject): Promise<void> {
         console.log('[VPP] markerBack()', args);
         const offset = this.offset(args);
-        const count = Math.abs(offset);
-        if (count === 0) return;
-        const direction = this.relativeDirection(offset, -1);
         const navigation = await import('./navigation');
-        const step = direction < 0 ? navigation.goPreviousCue : navigation.goNextCue;
-        for (let i = 0; i < count; i++) step();
+
+        if (offset >= 0) {
+            navigation.goMarkerBack(offset);
+            return;
+        }
+
+        // Preserve the established negative-offset compatibility behavior.
+        for (let i = 0; i < Math.abs(offset); i++) navigation.goNextCue();
     }
 
     public async goBack(args: JsonObject): Promise<void> {
