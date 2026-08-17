@@ -125,6 +125,10 @@ export function updateHighlight(): void {
         else { if (obj.element) { obj.element.classList.remove('current-word', 'text-neutral-500'); obj.element.classList.add('text-future'); } }
     });
     syncMarkerForPosition();
+    const currentWord = state.scriptWords[state.currentIndex];
+    if (currentWord && !currentWord.skip && !currentWord.isBreak && !currentWord.isStop) {
+        remoteEventHooks.HookWordChanged(currentWord.word);
+    }
 }
 
 export function scrollToCurrent(): void {
