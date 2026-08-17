@@ -1,4 +1,5 @@
 import { state } from './state';
+import { remoteEventHooks } from './remote-event-hooks';
 
 let activeGoogleDocUrl: string | null = null;
 let restartButtonOriginalHtml = '';
@@ -53,6 +54,8 @@ function renderRestartButton(syncing = false): void {
         return;
     }
 
+    // Preserve the original round button design. Only the icon color indicates
+    // that the button now performs Google Doc synchronization.
     button.className = restartButtonOriginalClass;
     button.classList.remove('text-neutral-400');
     button.classList.add('text-[#FFBB00]');
@@ -75,6 +78,8 @@ function reconcileGoogleDocSource(): void {
         return;
     }
 
+    // Internal reprocessing of the active script must not silently forget
+    // that the source is a Google Doc.
     if (activeGoogleDocUrl && isPrompterActive()) {
         state.googleDocUrl = activeGoogleDocUrl;
         document.getElementById('refreshGoogleDocContainer')?.classList.remove('hidden');
@@ -110,16 +115,68 @@ function isRemoteControlConnected(): boolean {
     return status.textContent?.trim() === '✓' && status.title.startsWith('Connected:');
 }
 
+/**
+ * Returns the latest complete cue marker at or before the current reading
+ * position. This deliberately works from state.scriptWords rather than the
+ * rendered DOM so it also covers a marker placed at absolute document start.
+ */
+function findCurrentMarker(): string | null {
+    if (state.scriptWords.length === 0) return null;
+
+    const limit = Math.min(state.currentIndex, state.scriptWords.length - 1);
+    let currentMarker: string | null = null;
+
+    for (let i = 0; i <= limit; i++) {
+        const first = state.scriptWords[i];
+        if (!first.word.startsWith('[')) continue;
+
+        const markerWords: string[] = [];
+        let end = i;
+        let closed = false;
+
+        while (end < state.scriptWords.length) {
+            const word = state.scriptWords[end];
+            if (end > i && (word.isBreak || word.isStop)) break;
+
+            markerWords.push(word.word);
+            if (word.word.includes(']')) {
+                closed = true;
+                break;
+            }
+            end++;
+        }
+
+        if (closed) {
+            currentMarker = markerWords.join(' ');
+            i = end;
+        }
+    }
+
+    return currentMarker;
+}
+
+function resyncCurrentMarker(): void {
+    const marker = findCurrentMarker();
+    if (!marker) return;
+
+    remoteEventHooks.HookMarker({ marker });
+    console.info('[VPP] Current marker resynced after BC connection:', marker);
+}
+
 function reconcileRemoteConnection(): void {
     const connectedNow = isRemoteControlConnected();
 
+    // A marker may have been reached while VPB/BC was not ready yet. As soon
+    // as the complete chain becomes connected, send the current marker once.
     if (connectedNow && !remoteConnected) {
-        window.dispatchEvent(new CustomEvent('vp-resync-current-marker'));
+        resyncCurrentMarker();
     }
 
     remoteConnected = connectedNow;
 }
 
+// Capture phase wins over the original restart click handler without changing
+// goStart/restartScript semantics used elsewhere in the app and VPP.
 document.addEventListener('click', event => {
     const target = event.target as Element | null;
     const restartButton = target?.closest('#restartScriptBtn');
@@ -130,6 +187,8 @@ document.addEventListener('click', event => {
     runGoogleDocResync();
 }, true);
 
+// Preserve the Google Doc source across current internal reprocessing paths
+// such as Preserve Formatting.
 document.addEventListener('change', event => {
     const target = event.target as HTMLElement | null;
     if (target?.id !== 'preserveFormattingToggle' || !state.googleDocUrl) return;
