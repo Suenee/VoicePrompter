@@ -14,9 +14,6 @@ type JsonObject = Record<string, unknown>;
 
 let managedSocket: WebSocket | null = null;
 let takenOver = false;
-let waitingBarObserver: MutationObserver | null = null;
-let waitingBarVisible = false;
-let renderingWaitingBar = false;
 
 const channel =
     'BroadcastChannel' in window
@@ -90,88 +87,24 @@ function removeTakeoverNotice(): void {
     document.getElementById(TAKEOVER_NOTICE_ID)?.remove();
 }
 
-function formatClock(): string {
-    const now = new Date();
-    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+function requestReconnect(): void {
+    takenOver = false;
+    removeTakeoverNotice();
+
+    const toggle = document.getElementById('remoteControlToggle') as HTMLInputElement | null;
+    if (!toggle) return;
+
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function renderWaitingBar(): void {
-    const bar = document.getElementById('voicePrompterStatusBar');
-    if (!bar || !waitingBarVisible || renderingWaitingBar) return;
+function confirmDisconnect(): void {
+    removeTakeoverNotice();
 
-    renderingWaitingBar = true;
-    try {
-        bar.style.setProperty('display', 'grid', 'important');
-        bar.style.gridTemplateColumns = '1fr 1fr';
+    const toggle = document.getElementById('remoteControlToggle') as HTMLInputElement | null;
+    if (toggle) toggle.checked = false;
 
-        const waitingZone = document.createElement('div');
-        waitingZone.className = 'vp-status-zone';
-        waitingZone.style.textAlign = 'left';
-        waitingZone.style.justifySelf = 'start';
-        waitingZone.style.width = '100%';
-
-        const spinner = document.createElement('span');
-        spinner.style.display = 'inline-block';
-        spinner.style.width = '10px';
-        spinner.style.height = '10px';
-        spinner.style.marginRight = '7px';
-        spinner.style.border = '2px solid #737373';
-        spinner.style.borderTopColor = '#facc15';
-        spinner.style.borderRadius = '999px';
-        spinner.style.animation = 'vp-status-spin .8s linear infinite';
-        spinner.style.verticalAlign = '-1px';
-        waitingZone.append(spinner, document.createTextNode('WAITING'));
-
-        const clockZone = document.createElement('div');
-        clockZone.className = 'vp-status-zone';
-        clockZone.style.textAlign = 'right';
-        clockZone.style.justifySelf = 'end';
-        clockZone.style.width = '100%';
-        clockZone.textContent = formatClock();
-
-        bar.replaceChildren(waitingZone, clockZone);
-    } finally {
-        renderingWaitingBar = false;
-    }
-}
-
-function startWaitingBar(): void {
-    const bar = document.getElementById('voicePrompterStatusBar');
-    if (!bar) return;
-
-    waitingBarVisible = window.getComputedStyle(bar).display !== 'none';
-    if (!waitingBarVisible) return;
-
-    renderWaitingBar();
-    waitingBarObserver?.disconnect();
-    waitingBarObserver = new MutationObserver(() => {
-        if (
-            bar.children.length === 2 &&
-            bar.firstElementChild?.textContent?.includes('WAITING')
-        ) {
-            return;
-        }
-        queueMicrotask(renderWaitingBar);
-    });
-    waitingBarObserver.observe(bar, {
-        childList: true,
-        subtree: true,
-        attributes: true,
-        attributeFilter: ['style']
-    });
-}
-
-function stopWaitingBar(hide = false): void {
-    waitingBarObserver?.disconnect();
-    waitingBarObserver = null;
-
-    const bar = document.getElementById('voicePrompterStatusBar');
-    if (bar) {
-        bar.style.removeProperty('display');
-        if (hide) bar.style.display = 'none';
-    }
-
-    waitingBarVisible = false;
+    updateDisconnectedStatus();
 }
 
 function playTakeoverBeep(): void {
@@ -199,28 +132,6 @@ function playTakeoverBeep(): void {
     } catch {
         // Browsers may block audio until the page has received user interaction.
     }
-}
-
-function requestReconnect(): void {
-    takenOver = false;
-    stopWaitingBar(false);
-    removeTakeoverNotice();
-
-    const toggle = document.getElementById('remoteControlToggle') as HTMLInputElement | null;
-    if (!toggle) return;
-
-    toggle.checked = true;
-    toggle.dispatchEvent(new Event('change', { bubbles: true }));
-}
-
-function confirmDisconnect(): void {
-    removeTakeoverNotice();
-    stopWaitingBar(true);
-
-    const toggle = document.getElementById('remoteControlToggle') as HTMLInputElement | null;
-    if (toggle) toggle.checked = false;
-
-    updateDisconnectedStatus();
 }
 
 function showTakeoverNotice(): void {
@@ -278,7 +189,6 @@ function showTakeoverNotice(): void {
 
 function relinquishRemoteControl(): void {
     takenOver = true;
-    startWaitingBar();
 
     if (managedSocket) {
         const current = managedSocket;
@@ -357,10 +267,10 @@ function handleDisconnectingMessage(event: MessageEvent): void {
 
     if (message.from === 'bc' && reason === 'user') {
         // Consume before remote-control.ts sees generic BC traffic and turns
-        // the indicator green again. The VPBridge socket itself stays alive.
+        // the indicator green again. Status Bar rendering remains owned by
+        // remote-control.ts; this coordination layer must never overwrite it.
         event.stopImmediatePropagation();
         updatePeerDisconnectedStatus();
-        startWaitingBar();
         return;
     }
 
@@ -370,7 +280,6 @@ function handleDisconnectingMessage(event: MessageEvent): void {
     ) {
         event.stopImmediatePropagation();
         updateServerDisconnectedStatus(reason);
-        startWaitingBar();
         // Existing socket close/reconnect handling remains authoritative.
     }
 }
@@ -406,7 +315,6 @@ class CoordinatedWebSocket extends NativeWebSocket {
 
         // Creating a new VPBridge connection is an explicit takeover.
         takenOver = false;
-        stopWaitingBar(false);
         removeTakeoverNotice();
         channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage);
 
