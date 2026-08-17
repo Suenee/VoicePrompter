@@ -1,4 +1,5 @@
 import { remoteCommandHandler } from './remote-command-handler';
+import { state } from './state';
 
 type MarkerArg = number | string;
 
@@ -36,6 +37,40 @@ export class RemoteEventHooks {
             source: { app: 'VoicePrompter', version: 'devel' },
             timestamp: new Date().toISOString()
         });
+    }
+
+    public SyncCurrentMarker(): void {
+        const marker = this.findCurrentMarker();
+        if (!marker) return;
+        this.HookMarker({ marker });
+    }
+
+    private findCurrentMarker(): string | null {
+        if (state.scriptWords.length === 0) return null;
+
+        let currentMarker: string | null = null;
+        const maxIndex = Math.min(state.currentIndex, state.scriptWords.length - 1);
+
+        for (let i = 0; i <= maxIndex; i++) {
+            if (!state.scriptWords[i].word.startsWith('[')) continue;
+
+            let end = i;
+            while (end < state.scriptWords.length && !state.scriptWords[end].word.includes(']')) {
+                if (end > i && (state.scriptWords[end].isBreak || state.scriptWords[end].isStop)) break;
+                end++;
+            }
+
+            if (end >= state.scriptWords.length || !state.scriptWords[end].word.includes(']')) continue;
+
+            currentMarker = state.scriptWords
+                .slice(i, end + 1)
+                .map(word => word.word)
+                .join(' ');
+
+            i = end;
+        }
+
+        return currentMarker;
     }
 
     private parseMarker(rawMarker: string): ParsedMarker | null {
@@ -161,3 +196,7 @@ export class RemoteEventHooks {
 }
 
 export const remoteEventHooks = new RemoteEventHooks();
+
+window.addEventListener('vp-resync-current-marker', () => {
+    remoteEventHooks.SyncCurrentMarker();
+});
