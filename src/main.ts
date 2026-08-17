@@ -1,4 +1,5 @@
 import './style.css';
+import './cursor-autohide';
 import { registerSW } from 'virtual:pwa-register';
 import { initElements, els } from './elements';
 import { state } from './state';
@@ -284,9 +285,7 @@ function unlockBodyScroll(): void {
 }
 function keepScrollZeroWhileLocked(): void { if (bodyScrollLocked && Math.round(window.scrollY) !== 0) window.scrollTo(0, 0); }
 if (window.visualViewport) { window.visualViewport.addEventListener('resize', keepScrollZeroWhileLocked); window.visualViewport.addEventListener('scroll', keepScrollZeroWhileLocked); }
-window.addEventListener('orientationchange', () => setTimeout(keepScrollZeroWhileLocked, 60));
-
-function clearHistory(): void { if (confirm('Clear all recent scripts?')) { clearAllHistory(); renderHistoryList(getHistory(), loadScript); } }
+window.addEventListener('orientationchange', () => setTimeout(keepScrollZeroWhileLocked, 100));
 
 els.loadScriptBtn.addEventListener('click', () => { (window as any).umami?.track('start-teleprompter'); loadScript(els.inputScript.value); });
 els.clearScriptBtn.addEventListener('click', () => { (window as any).umami?.track('clear-script'); els.inputScript.value = ''; els.inputScript.focus(); });
@@ -304,37 +303,31 @@ let isAutoScrollStarting = false;
 els.micButton.addEventListener('click', async () => {
     if (isAutoScrollStarting) { autoScrollManager.stop(); isAutoScrollStarting = false; return; }
     if (state.isListening) {
-        if (state.config.scrollingMode === 'voice') { (window as any).umami?.track('mic-stop'); stopListening(); }
-        else { autoScrollManager.stop(); state.isListening = false; import('./render').then(({ updateMicUI }) => updateMicUI(false)); }
-        const dock = document.getElementById('mainControlsDock'); if (dock) dock.style.opacity = '';
-    } else {
-        if (state.config.scrollingMode === 'voice') { (window as any).umami?.track('mic-start'); startListening(); }
-        else { isAutoScrollStarting = true; const started = await autoScrollManager.start(); isAutoScrollStarting = false; if (!started) { if (state.config.scrollingMode === 'sound') alert('Sound Scrolling needs microphone access. Please allow microphone permission and try again.'); return; } state.isListening = true; const { updateMicUI } = await import('./render'); updateMicUI(true); }
-        const dock = document.getElementById('mainControlsDock'); if (dock) dock.style.opacity = (state.config.dockOpacity / 100).toString();
+        if (state.config.scrollingMode === 'voice') stopListening();
+        else { autoScrollManager.stop(); state.isListening = false; updateMicUI(false); }
+        return;
     }
+    if (state.config.scrollingMode === 'voice') { startListening(); return; }
+    isAutoScrollStarting = true;
+    try { await autoScrollManager.start(); if (autoScrollManager.isRunning()) { state.isListening = true; updateMicUI(true); } }
+    finally { isAutoScrollStarting = false; }
 });
 
 els.resetAppBtn.addEventListener('click', resetApp);
 els.restartScriptBtn.addEventListener('click', restartScript);
 
+let promoTimeout: number | null = null;
+let promoIndex = 0;
+const promoPairs = [
+    { static: 'Record video in sync with your script.', options: ['Switch cameras.', 'Monitor audio.', 'Save locally.'] },
+    { static: 'No cloud. No tracking.', options: ['100% Offline.', 'Your data stays on device.', 'Privacy by design.'] },
+    { static: 'Designed for creators who move.', options: ['Mobile ready.', 'Tablet optimized.', 'Desktop powerful.'] }
+];
+let currentPromoPairStatic = promoPairs[0].static;
+let currentPromoWord = promoPairs[0].options[0];
 const visitorPlatform = detectVisitorPlatform();
 const nativePromo = getNativePromo(visitorPlatform);
-els.nativePromoTitle.textContent = nativePromo.title;
-let promoTimeout: number | null = null;
-let currentPromoPairIndex = 0;
-let currentPromoPairStatic = '';
-let currentPromoWord = '';
-function startPromoAnimation() {
-    if (promoTimeout) { window.clearTimeout(promoTimeout); promoTimeout = null; }
-    const subtitleEl = els.nativePromoSubtitle;
-    const pair = nativePromo.pairs[currentPromoPairIndex]; currentPromoPairIndex = (currentPromoPairIndex + 1) % nativePromo.pairs.length; currentPromoPairStatic = pair.line1;
-    if (pair.rotating.length === 0) { currentPromoWord = ''; subtitleEl.innerHTML = `<div>${pair.line1}</div><div>${pair.line2}</div>`; return; }
-    let currentIndex = 0; currentPromoWord = pair.rotating[currentIndex];
-    subtitleEl.innerHTML = `<div>${pair.line1}</div><div class="flex items-center">${pair.line2}<span class="promo-rotating-word inline-block transition-all duration-500 opacity-100 translate-y-0 text-[#FFBB00] font-medium whitespace-nowrap ml-1">${pair.rotating[currentIndex]}</span></div>`;
-    const rotatingEl = subtitleEl.querySelector('.promo-rotating-word') as HTMLElement;
-    function animateNextWord() { promoTimeout = window.setTimeout(() => { if (!document.body.contains(rotatingEl)) return; rotatingEl.classList.remove('opacity-100', 'translate-y-0'); rotatingEl.classList.add('opacity-0', '-translate-y-2'); promoTimeout = window.setTimeout(() => { if (!document.body.contains(rotatingEl)) return; currentIndex = (currentIndex + 1) % pair.rotating.length; currentPromoWord = pair.rotating[currentIndex]; rotatingEl.textContent = pair.rotating[currentIndex]; rotatingEl.classList.remove('-translate-y-2', 'transition-all', 'duration-500'); rotatingEl.classList.add('translate-y-2'); void rotatingEl.offsetWidth; rotatingEl.classList.add('transition-all', 'duration-500'); rotatingEl.classList.remove('opacity-0', 'translate-y-2'); rotatingEl.classList.add('opacity-100', 'translate-y-0'); animateNextWord(); }, 500); }, 1500); }
-    animateNextWord();
-}
+function startPromoAnimation() { if (promoTimeout) return; const tick = () => { promoIndex = (promoIndex + 1) % promoPairs.length; const pair = promoPairs[promoIndex]; currentPromoPairStatic = pair.static; currentPromoWord = pair.options[Math.floor(Math.random() * pair.options.length)]; els.nativePromoTitle.textContent = pair.static; els.nativePromoSubtitle.textContent = currentPromoWord; promoTimeout = window.setTimeout(tick, 3500); }; promoTimeout = window.setTimeout(tick, 3500); }
 function stopPromoAnimation() { if (promoTimeout) { window.clearTimeout(promoTimeout); promoTimeout = null; } }
 els.toggleSettingsBtn.addEventListener('click', () => { (window as any).umami?.track('settings-toggle'); const isHidden = els.settingsPanel.classList.toggle('hidden'); if (!isHidden) { startPromoAnimation(); if (!isIOS) enumerateAndPopulateDevices(false); } else stopPromoAnimation(); });
 els.closeSettingsBtn.addEventListener('click', () => { els.settingsPanel.classList.add('hidden'); stopPromoAnimation(); });
@@ -347,6 +340,8 @@ els.marginInput.addEventListener('input', (e) => { const val = parseInt((e.targe
 els.dockOpacityInput.addEventListener('input', (e) => { const val = parseInt((e.target as HTMLInputElement).value); state.config.dockOpacity = val; els.dockOpacityVal.textContent = `${val}%`; if (state.isListening || state.isRecording) { const dock = document.getElementById('mainControlsDock'); if (dock) dock.style.opacity = (val / 100).toString(); } });
 els.activeLinePositionInput.addEventListener('input', (e) => { const val = parseInt((e.target as HTMLInputElement).value); state.config.activeLinePosition = val; els.activeLinePositionVal.textContent = `${val}%`; scrollToCurrent(); });
 els.lookaheadWordsInput.addEventListener('input', (e) => { const val = parseInt((e.target as HTMLInputElement).value); state.config.lookaheadWords = val; els.lookaheadWordsVal.textContent = `${val}`; });
+els.scrollSpeedInput.addEventListener('input', (e) => { const val = parseFloat((e.target as HTMLInputElement).value); state.config.scrollSpeed = val; els.scrollSpeedVal.textContent = `${val.toFixed(1)} w/s`; });
+els.soundSensitivityInput.addEventListener('input', (e) => { const val = parseFloat((e.target as HTMLInputElement).value); state.config.soundSensitivity = val; els.soundSensitivityVal.textContent = `${Math.round(val * 100)}%`; });
 els.textColorInput.addEventListener('input', (e) => { state.config.textColor = (e.target as HTMLInputElement).value; applySettings(); });
 els.bgColorInput.addEventListener('input', (e) => { state.config.bgColor = (e.target as HTMLInputElement).value; applySettings(); });
 (['left', 'center', 'right'] as const).forEach(align => els.alignBtns[align].addEventListener('click', () => { state.config.textAlign = align; els.scriptContent.style.textAlign = align; updateAlignmentButtons(); }));
@@ -361,14 +356,30 @@ els.preserveFormattingToggle.addEventListener('change', (e) => { state.config.pr
 els.voiceCommandToggle.addEventListener('change', (e) => { const enabled = (e.target as HTMLInputElement).checked; state.config.voiceCommandsEnabled = enabled; saveSetting('voiceCommandsEnabled', enabled); });
 els.screenRotationToggle.addEventListener('change', (e) => { state.isScreenRotated = (e.target as HTMLInputElement).checked; document.body.classList.toggle('screen-rotated', state.isScreenRotated); pinDockToVisualViewport(); });
 els.smoothAnimationsToggle.addEventListener('change', (e) => { state.config.smoothAnimations = (e.target as HTMLInputElement).checked; applySettings(); });
-els.highlightActiveWordToggle.addEventListener('change', (e) => { state.config.highlightActiveWord = (e.target as HTMLInputElement).checked; applySettings(); updateHighlight(); });
-(['mono', 'sans', 'serif', 'comicSans', 'openDyslexic'] as const).forEach(font => els.fontFamilyBtns[font].addEventListener('click', () => { state.config.fontFamily = font; applySettings(); updateFontFamilyButtons(); }));
-els.clearHistoryBtn.addEventListener('click', clearHistory);
+els.highlightActiveWordToggle.addEventListener('change', (e) => { state.config.highlightActiveWord = (e.target as HTMLInputElement).checked; applySettings(); });
+
+function updateAlignmentButtons() { (['left', 'center', 'right'] as const).forEach(align => { const active = state.config.textAlign === align; els.alignBtns[align].classList.toggle('bg-[#FFBB00]', active); els.alignBtns[align].classList.toggle('text-black', active); els.alignBtns[align].classList.toggle('bg-neutral-800', !active); els.alignBtns[align].classList.toggle('text-neutral-300', !active); }); }
+function updateDirectionButtons() { (['ltr', 'rtl'] as const).forEach(dir => { const active = state.config.textDirection === dir; els.dirBtns[dir].classList.toggle('bg-[#FFBB00]', active); els.dirBtns[dir].classList.toggle('text-black', active); els.dirBtns[dir].classList.toggle('bg-neutral-800', !active); els.dirBtns[dir].classList.toggle('text-neutral-300', !active); }); }
+
+let dockVisualViewportRaf: number | null = null;
+function pinDockToVisualViewport() { if (dockVisualViewportRaf !== null) return; dockVisualViewportRaf = requestAnimationFrame(() => { dockVisualViewportRaf = null; const dock = document.getElementById('mainControlsDock'); if (!dock) return; const vv = window.visualViewport; if (!vv) { dock.style.removeProperty('transform'); return; } const centeredOffset = (vv.width / 2) - (window.innerWidth / 2); dock.style.transform = `translateX(calc(-50% + ${centeredOffset}px))`; }); }
+if (window.visualViewport) { window.visualViewport.addEventListener('resize', pinDockToVisualViewport); window.visualViewport.addEventListener('scroll', pinDockToVisualViewport); }
+window.addEventListener('orientationchange', () => setTimeout(pinDockToVisualViewport, 100));
+
+els.fontFamilyBtns.mono.addEventListener('click', () => { state.config.fontFamily = 'mono'; applySettings(); });
+els.fontFamilyBtns.sans.addEventListener('click', () => { state.config.fontFamily = 'sans'; applySettings(); });
+els.fontFamilyBtns.serif.addEventListener('click', () => { state.config.fontFamily = 'serif'; applySettings(); });
+els.fontFamilyBtns.comicSans.addEventListener('click', () => { state.config.fontFamily = 'comicSans'; applySettings(); });
+els.fontFamilyBtns.openDyslexic.addEventListener('click', () => { state.config.fontFamily = 'openDyslexic'; applySettings(); });
+
+els.scrollingModeSelect.addEventListener('change', (e) => { const mode = (e.target as HTMLSelectElement).value as ScrollingMode; if (state.isListening) { if (state.config.scrollingMode === 'voice') stopListening(); else { autoScrollManager.stop(); state.isListening = false; updateMicUI(false); } } state.config.scrollingMode = mode; els.scrollSpeedContainer.classList.toggle('hidden', mode !== 'auto'); els.soundSensitivityContainer.classList.toggle('hidden', mode !== 'sound'); const descriptions: Record<ScrollingMode, string> = { voice: 'Scrolls as you speak, matching words in real-time.', auto: 'Scrolls automatically at a constant speed.', sound: 'Scrolls when sound is detected from the microphone.' }; els.scrollingModeDescription.textContent = descriptions[mode]; updateMicUI(false); });
+
 els.dismissWarningBtn.addEventListener('click', () => els.browserWarning.classList.add('hidden'));
 els.dismissIpadWarningBtn.addEventListener('click', () => els.ipadPwaWarning.classList.add('hidden'));
-els.dismissLangWarningBtn.addEventListener('click', () => { els.langDetectionWarning.classList.add('hidden'); if (langWarningTimer) clearTimeout(langWarningTimer); });
+els.dismissLangWarningBtn.addEventListener('click', () => els.langDetectionWarning.classList.add('hidden'));
 els.dismissAndroidVideoWarningBtn.addEventListener('click', () => els.androidVideoWarning.classList.add('hidden'));
-els.videoModeBtn.addEventListener('click', async () => { if (state.isVideoMode) exitVideoMode(); else { const originalContent = els.videoModeBtn.innerHTML; (els.videoModeBtn as HTMLButtonElement).disabled = true; els.videoModeBtn.innerHTML = `<svg class="animate-spin h-6 w-6 text-neutral-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`; await enterVideoMode(); (els.videoModeBtn as HTMLButtonElement).disabled = false; els.videoModeBtn.innerHTML = originalContent; } });
+
+els.videoModeBtn.addEventListener('click', () => { if (!state.isVideoMode) enterVideoMode(); else exitVideoMode(); });
 els.videoLayoutToggleBtn.addEventListener('click', toggleVideoLayout);
 els.videoFlipCameraBtn.addEventListener('click', flipCamera);
 els.videoRecordBtn.addEventListener('click', startRecording);
@@ -384,32 +395,18 @@ function initializeUI(): void {
     els.dockOpacityVal.textContent = `${state.config.dockOpacity}%`; els.dockOpacityInput.value = state.config.dockOpacity.toString();
     els.activeLinePositionVal.textContent = `${state.config.activeLinePosition}%`; els.activeLinePositionInput.value = state.config.activeLinePosition.toString();
     els.lookaheadWordsVal.textContent = `${state.config.lookaheadWords}`; els.lookaheadWordsInput.value = state.config.lookaheadWords.toString();
-    updateAlignmentButtons(); updateDirectionButtons();
-    els.smoothAnimationsToggle.checked = state.config.smoothAnimations; els.highlightActiveWordToggle.checked = state.config.highlightActiveWord; els.voiceCommandToggle.checked = state.config.voiceCommandsEnabled; els.stopSignToggle.checked = state.config.showStopIcon;
-    const history = getHistory();
-    if (history.length === 0) {
-        const demoText = `Welcome to VoicePrompter - a completely free teleprompter that works right in the browser.\nThis text is scrolling automatically as you speak following your voice.\nSee the highlighted word? That's where you are in the script right now.\nIf you want to jump to a different part, just tap any word and it syncs instantly.\nYou can also use voice commands like go back, go next, go start, or go finish.\nThe app can also record video with the script overlaid, so you don't need any extra software.\nIn the settings you can adjust font size, margins, line and paragraph spacing, pick a color theme and more - I encourage you to explore the settings on your own and find the best ones for you.\nThe app supports 34 languages and detects them automatically.\nOne more thing - text in square brackets gets skipped automatically [like this]. Useful for notes or reminders to yourself.\nEverything runs on your device. Nothing is sent to any server. You can even save it to your home screen and use it completely offline.\n\nNow go make something great ;)`;
-        const demoItem = { id: Date.now(), text: demoText, preview: demoText.substring(0, 40) + '...', date: new Date().toLocaleDateString(), tag: 'demo' };
-        localStorage.setItem('teleprompter_history', JSON.stringify([demoItem])); els.inputScript.value = demoText; renderHistoryList(getHistory(), loadScript);
-    } else renderHistoryList(history, loadScript);
-    updateAutoDetectText(null); applySettings(); updateFontFamilyButtons();
-    if (isIOS) { if (els.devicesSelectionContainer) els.devicesSelectionContainer.classList.add('hidden'); } else enumerateAndPopulateDevices(false);
+    els.scrollSpeedVal.textContent = `${state.config.scrollSpeed.toFixed(1)} w/s`; els.scrollSpeedInput.value = state.config.scrollSpeed.toString();
+    els.soundSensitivityVal.textContent = `${Math.round(state.config.soundSensitivity * 100)}%`; els.soundSensitivityInput.value = state.config.soundSensitivity.toString();
+    els.textColorInput.value = state.config.textColor; els.bgColorInput.value = state.config.bgColor;
+    els.scriptContent.style.fontSize = `${state.config.fontSize}px`; els.scriptContent.style.paddingLeft = `${state.config.margin}%`; els.scriptContent.style.paddingRight = `${state.config.margin}%`;
+    els.scrollingModeSelect.value = state.config.scrollingMode; els.scrollSpeedContainer.classList.toggle('hidden', state.config.scrollingMode !== 'auto'); els.soundSensitivityContainer.classList.toggle('hidden', state.config.scrollingMode !== 'sound');
+    els.voiceCommandToggle.checked = state.config.voiceCommandsEnabled; els.stopSignToggle.checked = state.config.showStopIcon;
+    els.screenRotationToggle.checked = state.isScreenRotated; document.body.classList.toggle('screen-rotated', state.isScreenRotated);
+    els.mirrorToggle.checked = state.isMirrored; els.scrollContainer.classList.toggle('mirror-mode', state.isMirrored);
+    els.hMirrorToggle.checked = state.isMirroredH; els.scrollContainer.classList.toggle('mirror-mode-h', state.isMirroredH);
+    els.preserveFormattingToggle.checked = state.config.preserveFormatting; els.smoothAnimationsToggle.checked = state.config.smoothAnimations; els.highlightActiveWordToggle.checked = state.config.highlightActiveWord;
+    applySettings(); updateAlignmentButtons(); updateDirectionButtons(); updateAutoDetectText(state.detectedLanguage); pinDockToVisualViewport();
 }
-function updateAlignmentButtons(): void { (['left', 'center', 'right'] as const).forEach(a => { const btn = els.alignBtns[a]; const isActive = a === state.config.textAlign; btn.classList.toggle('bg-neutral-500', isActive); btn.classList.toggle('text-white', isActive); btn.classList.toggle('hover:bg-neutral-600', !isActive); }); }
-function updateDirectionButtons(): void { (['ltr', 'rtl'] as const).forEach(dir => { const btn = els.dirBtns[dir]; const isActive = state.config.textDirection === dir; btn.classList.toggle('bg-neutral-700', isActive); btn.classList.toggle('text-white', isActive); btn.classList.toggle('border-[#FFBB00]', isActive); btn.classList.toggle('bg-neutral-800', !isActive); btn.classList.toggle('text-neutral-300', !isActive); btn.classList.toggle('border-neutral-700', !isActive); }); }
-function updateFontFamilyButtons(): void { (['mono', 'sans', 'serif', 'comicSans', 'openDyslexic'] as const).forEach(font => { const btn = els.fontFamilyBtns[font]; const isActive = state.config.fontFamily === font; btn.classList.toggle('bg-neutral-700', isActive); btn.classList.toggle('text-white', isActive); btn.classList.toggle('border-[#FFBB00]', isActive); btn.classList.toggle('bg-neutral-800', !isActive); btn.classList.toggle('text-neutral-300', !isActive); btn.classList.toggle('border-neutral-700', !isActive); }); }
-async function handleDeviceChange(): Promise<void> { state.selectedVideoDeviceId = els.videoDeviceSelect.value || null; state.selectedAudioDeviceId = els.audioDeviceSelect.value || null; if (state.isVideoMode && !state.isRecording) { try { const stream = await navigator.mediaDevices.getUserMedia(getMediaConstraints()); if (state.mediaStream) state.mediaStream.getTracks().forEach(track => track.stop()); state.mediaStream = stream; els.videoPreview.srcObject = stream; els.videoPreview.muted = true; els.videoPreview.style.transform = state.selectedVideoDeviceId ? 'none' : (state.facingMode === 'user' ? 'scaleX(-1)' : 'none'); await els.videoPreview.play(); } catch (err) { console.error('Failed to switch media device sources:', err); alert('Failed to switch to the selected device.'); } } if (state.isListening) { if (state.config.scrollingMode === 'sound') { autoScrollManager.stop(); const started = await autoScrollManager.start(); if (!started) { state.isListening = false; const { updateMicUI } = await import('./render'); updateMicUI(false); } } else if (state.config.scrollingMode === 'voice') { stopListening(); setTimeout(() => startListening(), 400); } } }
-if (!isIOS) { els.videoDeviceSelect.addEventListener('change', handleDeviceChange); els.audioDeviceSelect.addEventListener('change', handleDeviceChange); }
-const permissionRequested = { video: false, audio: false };
-async function requestPermissionsOnSelectFocus(kind: 'video' | 'audio') { if (permissionRequested[kind]) return; const devices = await navigator.mediaDevices.enumerateDevices(); const needsPermission = devices.some(d => kind === 'video' ? d.kind === 'videoinput' && !d.label : d.kind === 'audioinput' && !d.label); if (needsPermission) { permissionRequested[kind] = true; await enumerateAndPopulateDevices(true, kind); } }
-if (!isIOS) { els.videoDeviceSelect.addEventListener('focus', () => requestPermissionsOnSelectFocus('video')); els.audioDeviceSelect.addEventListener('focus', () => requestPermissionsOnSelectFocus('audio')); els.videoDeviceSelect.addEventListener('mousedown', () => requestPermissionsOnSelectFocus('video')); els.audioDeviceSelect.addEventListener('mousedown', () => requestPermissionsOnSelectFocus('audio')); navigator.mediaDevices.addEventListener('devicechange', () => enumerateAndPopulateDevices(false)); }
-function updateScrollingUI() { els.scrollingModeSelect.value = state.config.scrollingMode; els.scrollSpeedInput.value = state.config.scrollSpeed.toString(); els.scrollSpeedVal.textContent = `${state.config.scrollSpeed.toFixed(1)} w/s`; els.soundSensitivityInput.value = state.config.soundSensitivity.toString(); els.soundSensitivityVal.textContent = `${Math.round(state.config.soundSensitivity * 100)}%`; els.scrollSpeedContainer.classList.toggle('hidden', state.config.scrollingMode === 'voice'); els.soundSensitivityContainer.classList.toggle('hidden', state.config.scrollingMode !== 'sound'); const descriptions: Record<ScrollingMode, string> = { voice: 'Follows the words you say and pauses when you pause.', sound: 'Scrolls while microphone sound is detected and pauses during silence.', constant: 'Scrolls continuously at the speed you choose.' }; els.scrollingModeDescription.textContent = descriptions[state.config.scrollingMode]; const path = els.micButton.querySelector('path'); if (path) { if (state.config.scrollingMode === 'voice') path.setAttribute('d', 'M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.91-3c-.49 0-.9.36-.98.85C16.52 14.2 14.47 16 12 16s-4.52-1.8-4.93-4.15c-.08-.49-.49-.85-.98-.85-.61 0-1.09.54-1 1.14.49 3 2.89 5.35 5.91 5.78V20c0 .55.45 1 1 1s1-.45 1-1v-2.08c3.02-.43 5.42-2.78 5.91-5.78.1-.6-.39-1.14-1-1.14z'); else path.setAttribute('d', 'M8 5v14l11-7z'); } }
-els.scrollingModeSelect.addEventListener('change', (e) => { state.config.scrollingMode = (e.target as HTMLSelectElement).value as ScrollingMode; autoScrollManager.stop(); isAutoScrollStarting = false; updateScrollingUI(); if (state.isListening) { stopListening(); autoScrollManager.stop(); state.isListening = false; import('./render').then(({ updateMicUI }) => updateMicUI(false)); } });
-els.scrollSpeedInput.addEventListener('input', (e) => { state.config.scrollSpeed = parseFloat((e.target as HTMLInputElement).value); els.scrollSpeedVal.textContent = `${state.config.scrollSpeed.toFixed(1)} w/s`; });
-els.soundSensitivityInput.addEventListener('input', (e) => { state.config.soundSensitivity = parseFloat((e.target as HTMLInputElement).value); els.soundSensitivityVal.textContent = `${Math.round(state.config.soundSensitivity * 100)}%`; });
-function boot(): void { updateScrollingUI(); initializeUI(); pinDockToVisualViewport(); setTimeout(() => renderHistoryList(getHistory(), loadScript), 500); }
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();
-window.addEventListener('pageshow', () => { renderHistoryList(getHistory(), loadScript); pinDockToVisualViewport(); });
-var dockPinned = false;
-function pinDockToVisualViewport(): void { const dock = document.getElementById('mainControlsDock'); const vv = window.visualViewport; if (!dock || !vv) return; const update = () => { if (document.body.classList.contains('screen-rotated')) { dock.style.top = ''; dock.style.bottom = ''; return; } if (dock.offsetHeight === 0) return; const visualBottomInLayout = vv.offsetTop + vv.height; const margin = 32; dock.style.bottom = 'auto'; dock.style.top = `${visualBottomInLayout - dock.offsetHeight - margin}px`; }; if (dockPinned) { requestAnimationFrame(update); return; } dockPinned = true; vv.addEventListener('resize', update); vv.addEventListener('scroll', update); window.addEventListener('orientationchange', () => { requestAnimationFrame(update); setTimeout(update, 300); }); requestAnimationFrame(update); const prompterContainer = document.getElementById('prompterContainer'); if (prompterContainer) { const observer = new MutationObserver((mutations) => { for (const mutation of mutations) if (mutation.attributeName === 'class') { const target = mutation.target as HTMLElement; if (!target.classList.contains('hidden')) requestAnimationFrame(update); } }); observer.observe(prompterContainer, { attributes: true, attributeFilter: ['class'] }); } }
-pinDockToVisualViewport();
+
+renderHistoryList(getHistory(), loadScript);
+initializeUI();
