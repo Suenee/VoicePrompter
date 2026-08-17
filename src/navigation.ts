@@ -90,6 +90,7 @@ export function goPreviousCue(): void {
 export function goMarkerBack(offset: number): void {
     if (state.scriptWords.length === 0 || !Number.isInteger(offset) || offset < 0) return;
 
+    const currentIndexBefore = state.currentIndex;
     const cues: number[] = [];
     for (let i = 0; i <= state.currentIndex && i < state.scriptWords.length; i++) {
         if (!isCueStart(i)) continue;
@@ -98,9 +99,36 @@ export function goMarkerBack(offset: number): void {
     }
 
     const targetCueIndex = cues.length - 1 - offset;
-    if (targetCueIndex < 0) return;
+    if (targetCueIndex < 0) {
+        console.info('[VPP][markerBack]', {
+            offset,
+            currentIndex: currentIndexBefore,
+            cueIndexes: cues,
+            targetCueIndex,
+            selectedCueIndex: null,
+            selectedCueEnd: null,
+            requestedTarget: null,
+            resultIndex: state.currentIndex,
+            reason: 'no marker available for requested offset'
+        });
+        return;
+    }
 
-    applyTarget(cueEnd(cues[targetCueIndex]) + 1);
+    const selectedCueIndex = cues[targetCueIndex];
+    const selectedCueEnd = cueEnd(selectedCueIndex);
+    const requestedTarget = selectedCueEnd + 1;
+    applyTarget(requestedTarget);
+
+    console.info('[VPP][markerBack]', {
+        offset,
+        currentIndex: currentIndexBefore,
+        cueIndexes: cues,
+        targetCueIndex,
+        selectedCueIndex,
+        selectedCueEnd,
+        requestedTarget,
+        resultIndex: state.currentIndex
+    });
 }
 
 export function goNextParagraph(): void { navigateParagraphs('forward', 1); }
