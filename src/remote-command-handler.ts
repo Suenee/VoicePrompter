@@ -132,6 +132,12 @@ export class RemoteCommandHandler {
                 return null;
             }
             void this.handleCall(message as CallMessage);
+        } else if (message.type === 'event' && message.event === 'disconnecting') {
+            this.handleDisconnectingEvent(message);
+            // The central transport must not interpret an announced departure as
+            // proof that the peer is still connected. The UI warning is handled
+            // through the internal CustomEvent below, without a second WS listener.
+            return null;
         } else {
             console.log(`[VPP] ${message.type} received:`, message);
         }
@@ -166,6 +172,34 @@ export class RemoteCommandHandler {
         } catch {
             return false;
         }
+    }
+
+    private handleDisconnectingEvent(message: JsonObject): void {
+        const args = message.args;
+        if (!args || typeof args !== 'object' || Array.isArray(args)) {
+            this.rejectInvalidMessage(message, 'disconnecting.args must be an object');
+            return;
+        }
+
+        const eventArgs = args as JsonObject;
+        if (Object.keys(eventArgs).length !== 1 || typeof eventArgs.reason !== 'string') {
+            this.rejectInvalidMessage(message, 'disconnecting accepts exactly the reason argument');
+            return;
+        }
+
+        const reason = eventArgs.reason;
+        const valid =
+            (message.from === 'bc' && reason === 'user') ||
+            (message.from === 'server' && (reason === 'shutdown' || reason === 'restart' || reason === 'exit'));
+
+        if (!valid) {
+            this.rejectInvalidMessage(message, 'invalid disconnecting sender/reason combination');
+            return;
+        }
+
+        window.dispatchEvent(new CustomEvent('vp-vpp-disconnecting', {
+            detail: { from: message.from, reason }
+        }));
     }
 
     private validateCall(message: JsonObject): string | null {
