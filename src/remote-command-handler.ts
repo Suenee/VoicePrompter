@@ -1,3 +1,5 @@
+import './debug';
+import './google-doc-sync';
 import './remote-control-instance';
 
 type JsonObject = Record<string, unknown>;
