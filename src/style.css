@@ -165,7 +165,14 @@ input[type=range]::-moz-range-track {
     overflow: auto;
 }
 
-
+/* Keep the main controls dock horizontally owned by CSS. JavaScript may
+   adjust only its vertical position for VisualViewport handling. */
+#mainControlsDock {
+    left: 0 !important;
+    right: 0 !important;
+    width: auto !important;
+    transform: none !important;
+}
 
 /* Toggle Switch Styling */
 .toggle-checkbox:checked {
@@ -286,7 +293,7 @@ input[type=range]::-moz-range-track {
     .video-mode-split #videoContainer {
         width: 50%;
         border-top: none;
-        border-left: 2px solid rgba(255, 255, 255, 0.1);
+        border-left: 2px solid rgba(255, 255,255, 0.1);
     }
 }
 
