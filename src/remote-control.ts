@@ -19,9 +19,11 @@ let heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
 let lastPeerActivityAt = 0;
 let pendingPingId: string | null = null;
 let statusBarClockTimer: number | null = null;
+let pendingStatusBarSyncId: string | null = null;
 
 type JsonObject = Record<string, unknown>;
 type RemoteStatus = 'disabled' | 'error' | 'bridge-only' | 'connected';
+type StatusBarSyncState = 'idle' | 'pending' | 'ready';
 export type StatusBarPosition = 'off' | 'top' | 'bottom';
 export type StatusBarAlign = 'left' | 'center' | 'right';
 
@@ -34,6 +36,11 @@ interface RemoteStatusPresentation {
     icon: string;
     color: string;
     title: string;
+}
+
+interface DisconnectingDetail {
+    from: 'bc' | 'server';
+    reason: string;
 }
 
 const REMOTE_STATUS_PRESENTATION: Record<RemoteStatus, RemoteStatusPresentation> = {
@@ -60,6 +67,7 @@ const REMOTE_STATUS_PRESENTATION: Record<RemoteStatus, RemoteStatusPresentation>
 };
 
 let remoteStatus: RemoteStatus = 'disabled';
+let statusBarSyncState: StatusBarSyncState = 'idle';
 let statusBarPosition: StatusBarPosition = loadSetting(STATUS_BAR_POSITION_KEY, 'off') as StatusBarPosition;
 let statusBarZoneCount: number | null = null;
 let statusBarZones: StatusBarZone[] = [];
@@ -80,6 +88,10 @@ function getStatusBarEnabled(): boolean {
     return statusBarPosition !== 'off' && getEnabled() && socket?.readyState === WebSocket.OPEN;
 }
 
+function canEditStatusBarMode(): boolean {
+    return remoteStatus === 'connected' && statusBarSyncState === 'ready';
+}
+
 function isTeleprompterActive(): boolean {
     const prompter = document.getElementById('prompterContainer');
     return !!prompter && !prompter.classList.contains('hidden');
@@ -87,6 +99,11 @@ function isTeleprompterActive(): boolean {
 
 function setRemoteStatus(status: RemoteStatus): void {
     remoteStatus = status;
+
+    if (status !== 'connected') {
+        pendingStatusBarSyncId = null;
+        statusBarSyncState = 'idle';
+    }
 
     const el = document.getElementById('remoteControlStatus');
     if (el) {
@@ -107,6 +124,7 @@ function setRemoteStatus(status: RemoteStatus): void {
                     : '#FFBB00';
     }
 
+    updateStatusPositionButtons(statusBarPosition);
     updateStatusBarVisibility();
 }
 
@@ -169,6 +187,98 @@ function sendRaw(message: JsonObject): boolean {
     if (socket?.readyState !== WebSocket.OPEN) return false;
 
     socket.send(JSON.stringify(message));
+    return true;
+}
+
+function requestStatusBarSync(): void {
+    if (
+        remoteStatus !== 'connected' ||
+        socket?.readyState !== WebSocket.OPEN ||
+        statusBarSyncState === 'pending' ||
+        statusBarSyncState === 'ready'
+    ) {
+        return;
+    }
+
+    resetStatusBarSessionData(false);
+
+    const id = crypto.randomUUID();
+    pendingStatusBarSyncId = id;
+    statusBarSyncState = 'pending';
+    updateStatusPositionButtons(statusBarPosition);
+    updateStatusBarVisibility();
+
+    const sent = sendRaw({
+        protocolVersion: 1,
+        id,
+        type: 'event',
+        from: 'vp',
+        recipient: 'bc',
+        event: 'statusBarSyncRequest',
+        args: {},
+        expectsResponse: true,
+        source: { app: 'VoicePrompter', version: 'devel' },
+        timestamp: new Date().toISOString()
+    });
+
+    if (!sent) {
+        pendingStatusBarSyncId = null;
+        statusBarSyncState = 'idle';
+        updateStatusPositionButtons(statusBarPosition);
+    }
+}
+
+function handleStatusBarSyncResponse(message: JsonObject): boolean {
+    if (
+        !pendingStatusBarSyncId ||
+        message.from !== 'bc' ||
+        message.recipient !== 'vp' ||
+        message.correlationId !== pendingStatusBarSyncId ||
+        (message.type !== 'response' && message.type !== 'error')
+    ) {
+        return false;
+    }
+
+    pendingStatusBarSyncId = null;
+
+    if (message.type === 'error') {
+        statusBarSyncState = 'idle';
+        console.warn('[RemoteControl] Status Bar synchronization failed', message);
+        updateStatusPositionButtons(statusBarPosition);
+        updateStatusBarVisibility();
+        return true;
+    }
+
+    const result = message.result;
+    const available =
+        result &&
+        typeof result === 'object' &&
+        !Array.isArray(result)
+            ? (result as JsonObject).available
+            : undefined;
+
+    if (typeof available !== 'boolean') {
+        statusBarSyncState = 'idle';
+        console.warn('[RemoteControl] Invalid Status Bar synchronization response', message);
+        updateStatusPositionButtons(statusBarPosition);
+        updateStatusBarVisibility();
+        return true;
+    }
+
+    if (!available) {
+        resetStatusBarSessionData(false);
+    }
+
+    statusBarSyncState = 'ready';
+    updateStatusPositionButtons(statusBarPosition);
+    updateStatusBarVisibility();
+
+    console.info(
+        `[RemoteControl] Status Bar synchronization completed; state ${
+            available ? 'restored' : 'not available'
+        }`
+    );
+
     return true;
 }
 
@@ -296,6 +406,7 @@ function handleServerPingResponse(message: JsonObject): boolean {
     }
 
     setRemoteStatus(bcConnected ? 'connected' : 'bridge-only');
+    if (bcConnected) requestStatusBarSync();
 
     console.info(
         `[RemoteControl] VPBridge heartbeat ok; BC ${
@@ -381,6 +492,7 @@ function connect(): void {
 
             console.info(`[RemoteControl] Connected to ${url}`);
 
+            updateStatusPositionButtons(statusBarPosition);
             updateStatusBarVisibility();
             sendServerPing();
         };
@@ -390,10 +502,12 @@ function connect(): void {
             if (!parsed) return;
 
             if (handleServerPingResponse(parsed)) return;
+            if (handleStatusBarSyncResponse(parsed)) return;
 
             if (parsed.from === 'bc') {
                 lastPeerActivityAt = Date.now();
                 setRemoteStatus('connected');
+                requestStatusBarSync();
                 scheduleHeartbeatCheck();
             }
         };
@@ -424,6 +538,25 @@ function connect(): void {
         reconnectTimer = window.setTimeout(connect, 2000);
     }
 }
+
+window.addEventListener('vp-vpp-disconnecting', event => {
+    const detail = (event as CustomEvent<DisconnectingDetail>).detail;
+    if (!detail) return;
+
+    resetStatusBarSessionData(false);
+
+    if (detail.from === 'bc' && detail.reason === 'user') {
+        setRemoteStatus('bridge-only');
+        return;
+    }
+
+    if (
+        detail.from === 'server' &&
+        (detail.reason === 'shutdown' || detail.reason === 'restart' || detail.reason === 'exit')
+    ) {
+        setRemoteStatus('error');
+    }
+});
 
 function ensureStatusBarStyles(): void {
     if (document.getElementById('voicePrompterStatusBarStyles')) return;
@@ -485,7 +618,7 @@ function formatClock(): string {
 
 function placeholderZones(): StatusBarZone[] {
     return [
-        { text: 'WAITING', align: 'left' },
+        { text: 'WAITING...', align: 'left' },
         { text: formatClock(), align: 'right' }
     ];
 }
@@ -630,10 +763,6 @@ function setStatusBarPosition(
     if (changed) emitStatusBarModeChanged(statusBarPosition);
 }
 
-export function getStatusBarMode(): StatusBarPosition {
-    return statusBarPosition;
-}
-
 export function setStatusBarMode(mode: StatusBarPosition): void {
     setStatusBarPosition(mode);
 }
@@ -659,10 +788,13 @@ export function setStatusBarZone(
 }
 
 export function clearStatusBarData(): void {
-    resetStatusBarSessionData();
+    statusBarZones = [];
+    updateStatusBarVisibility();
 }
 
 function updateStatusPositionButtons(position: StatusBarPosition): void {
+    const editable = canEditStatusBarMode();
+
     document
         .querySelectorAll<HTMLButtonElement>('[data-status-bar-position]')
         .forEach(button => {
@@ -671,6 +803,9 @@ function updateStatusPositionButtons(position: StatusBarPosition): void {
             button.style.backgroundColor = active ? '#FFBB00' : '';
             button.style.color = active ? '#000000' : '';
             button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            button.disabled = !editable;
+            button.style.opacity = editable ? '' : '0.45';
+            button.style.cursor = editable ? '' : 'not-allowed';
         });
 }
 
@@ -1079,6 +1214,8 @@ window.addEventListener('DOMContentLoaded', () => {
         .querySelectorAll<HTMLButtonElement>('[data-status-bar-position]')
         .forEach(button =>
             button.addEventListener('click', () => {
+                if (!canEditStatusBarMode()) return;
+
                 pendingStatusBarPosition =
                     normalizeStatusBarPosition(
                         button.dataset.statusBarPosition
@@ -1095,8 +1232,10 @@ window.addEventListener('DOMContentLoaded', () => {
         portInput.value = String(DEFAULT_PORT);
         apiKeyInput.value = '';
 
-        pendingStatusBarPosition = 'off';
-        updateStatusPositionButtons('off');
+        if (canEditStatusBarMode()) {
+            pendingStatusBarPosition = 'off';
+        }
+        updateStatusPositionButtons(pendingStatusBarPosition);
     });
 
     toggle.addEventListener('change', () => {
@@ -1140,7 +1279,9 @@ window.addEventListener('DOMContentLoaded', () => {
         saveSetting('remoteControlPort', port);
         saveSetting('remoteControlApiKey', apiKey);
 
-        setStatusBarPosition(pendingStatusBarPosition);
+        if (canEditStatusBarMode()) {
+            setStatusBarPosition(pendingStatusBarPosition);
+        }
         closeModal();
 
         if (getEnabled()) {
@@ -1162,7 +1303,7 @@ window.addEventListener('DOMContentLoaded', () => {
         'voiceprompter:reset-defaults',
         () => {
             setStatusBarPosition('off');
-            clearStatusBarData();
+            resetStatusBarSessionData();
         }
     );
 
