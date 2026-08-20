@@ -85,7 +85,7 @@ Choose how your text is aligned:
 ### Toggles
 
 #### Mirror Mode 🪞
-Enables horizontal flip + 180° rotation — perfect for use with teleprompter glass. The reflected text reads correctly when bounced off a mirror/glass placed in front of the camera.
+Enables horizontal flip + 180° rotation — perfect for use with teleprompter glass setups. The reflected text reads correctly when bounced off a mirror/glass placed in front of the camera.
 
 #### Show Stop Signs 🛑
 Displays visual markers (dots) at punctuation marks (periods, exclamation points, question marks) to help you pace your reading.
@@ -136,7 +136,7 @@ The app supports automatic language detection and manual selection for:
 
 English, Spanish, French, German, Italian, Portuguese, Russian, Japanese, Chinese, Korean, Arabic, Dutch, Polish, Ukrainian, Hindi, Turkish, Swedish, Danish, Finnish, Norwegian, and more.
 
-**Auto-Detect** automatically identifies the language of your script and selects the appropriate speech recognition model.
+**Auto-Detect** automatically identifies the language of your script and selects the appropriate speech recognition model!
 
 ## 💾 Script History
 
@@ -186,6 +186,10 @@ Your scripts are automatically saved to your browser's local storage:
 - **PWA:** Workbox (service worker for offline support)
 - **APIs:** Web Speech API, MediaRecorder API, Clipboard API, Local Storage
 - **Language Detection:** franc-min library
+
+## 🔌 VoicePrompter Protocol (VPP)
+
+The authoritative VPP specification is maintained in the VoicePrompterModule repository: [PROTOCOL.md](https://github.com/Suenee/companion-module-voiceprompter/blob/devel/PROTOCOL.md). VoicePrompter does not maintain a duplicate protocol specification.
 
 ## 📄 License
 
