@@ -215,7 +215,7 @@ function requestStatusBarSync(): void {
         from: 'vp',
         recipient: 'bc',
         event: 'statusBarSyncRequest',
-        args: {},
+        args: { mode: statusBarPosition },
         expectsResponse: true,
         source: { app: 'VoicePrompter', version: 'devel' },
         timestamp: new Date().toISOString()
