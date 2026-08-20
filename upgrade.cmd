@@ -39,9 +39,12 @@ if /I not "%VP_DOWNLOADED_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :self_update_ver
 
 move /y "%VP_UPDATER_TMP%" "%~f0" >>"%VP_LOG%" 2>&1 || goto :self_update_replace_error
 
-call :info "Restarting with the current upgrade.cmd..."
-call "%~f0" --self-updated
-exit /b %errorlevel%
+call :info "Handing off to the current upgrade.cmd..."
+rem IMPORTANT: do not CALL the replaced batch file from this batch context.
+rem Start a fresh cmd.exe in the same console and terminate this invocation so
+rem the application upgrade can run exactly once.
+start "" /b "%ComSpec%" /d /s /c ""%~f0" --self-updated"
+exit /b 0
 
 :self_update_read_error
 call :err "Could not read upgrade.cmd from origin/devel."
