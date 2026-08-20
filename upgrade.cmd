@@ -69,18 +69,18 @@ call :info "upgrade.cmd is current."
 call :info "Checking for VoicePrompter-owned Node/esbuild processes..."
 del /q "%VP_DEV_FLAG%" >nul 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop'; $repo=[IO.Path]::GetFullPath($env:VP_REPO).TrimEnd('\').ToLowerInvariant(); $flag=$env:VP_DEV_FLAG; $log=$env:VP_LOG;" ^
+  "$ErrorActionPreference='Stop'; $repo=[IO.Path]::GetFullPath($env:VP_REPO).TrimEnd('\').ToLowerInvariant(); $flag=$env:VP_DEV_FLAG;" ^
   "$all=@(Get-CimInstance Win32_Process);" ^
   "$owned=@($all | Where-Object { $n=$_.Name.ToLowerInvariant(); $cl=[string]$_.CommandLine; $ep=[string]$_.ExecutablePath; (($n -eq 'node.exe') -or ($n -eq 'esbuild.exe')) -and ((($cl.ToLowerInvariant()).Contains($repo)) -or (($ep.ToLowerInvariant()).Contains($repo))) });" ^
   "$vite=@($owned | Where-Object { $_.Name -ieq 'node.exe' -and ([string]$_.CommandLine) -match '(?i)(^|[\\/])vite([\\/]|\.|\s|$)' });" ^
   "if($vite.Count -gt 0){ Set-Content -LiteralPath $flag -Value '1' -NoNewline };" ^
-  "if($owned.Count -eq 0){ Add-Content -LiteralPath $log -Value '[VoicePrompter] No VoicePrompter-owned Node/esbuild processes detected.'; exit 0 };" ^
-  "Add-Content -LiteralPath $log -Value '[VoicePrompter] VoicePrompter-owned processes selected for shutdown:'; foreach($p in $owned){ Add-Content -LiteralPath $log -Value ('  PID '+$p.ProcessId+' '+$p.Name+' '+([string]$p.CommandLine)) };" ^
+  "if($owned.Count -eq 0){ Write-Output '[VoicePrompter] No VoicePrompter-owned Node/esbuild processes detected.'; exit 0 };" ^
+  "Write-Output '[VoicePrompter] VoicePrompter-owned processes selected for shutdown:'; foreach($p in $owned){ Write-Output ('  PID '+$p.ProcessId+' '+$p.Name+' '+([string]$p.CommandLine)) };" ^
   "$ids=New-Object 'System.Collections.Generic.HashSet[int]'; foreach($p in $owned){ [void]$ids.Add([int]$p.ProcessId) };" ^
   "$changed=$true; while($changed){ $changed=$false; foreach($p in $all){ if($ids.Contains([int]$p.ParentProcessId) -and -not $ids.Contains([int]$p.ProcessId)){ [void]$ids.Add([int]$p.ProcessId); $changed=$true } } };" ^
-  "$targets=@($all | Where-Object { $ids.Contains([int]$_.ProcessId) } | Sort-Object ProcessId -Descending); foreach($p in $targets){ try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop; Add-Content -LiteralPath $log -Value ('[VoicePrompter] Stopped PID '+$p.ProcessId+' '+$p.Name) } catch { Add-Content -LiteralPath $log -Value ('ERROR: Could not stop PID '+$p.ProcessId+' '+$p.Name+': '+$_.Exception.Message); exit 2 } };" ^
+  "$targets=@($all | Where-Object { $ids.Contains([int]$_.ProcessId) } | Sort-Object ProcessId -Descending); foreach($p in $targets){ try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop; Write-Output ('[VoicePrompter] Stopped PID '+$p.ProcessId+' '+$p.Name) } catch { Write-Error ('Could not stop PID '+$p.ProcessId+' '+$p.Name+': '+$_.Exception.Message); exit 2 } };" ^
   "$deadline=(Get-Date).AddSeconds(5); do { Start-Sleep -Milliseconds 200; $left=@(Get-CimInstance Win32_Process | Where-Object { $ids.Contains([int]$_.ProcessId) }) } while($left.Count -gt 0 -and (Get-Date) -lt $deadline);" ^
-  "if($left.Count -gt 0){ foreach($p in $left){ Add-Content -LiteralPath $log -Value ('ERROR: Process still running: PID '+$p.ProcessId+' '+$p.Name) }; exit 3 }; exit 0" >>"%VP_LOG%" 2>&1
+  "if($left.Count -gt 0){ foreach($p in $left){ Write-Error ('Process still running: PID '+$p.ProcessId+' '+$p.Name) }; exit 3 }; exit 0" >>"%VP_LOG%" 2>&1
 if errorlevel 1 (
     call :err "Could not safely stop VoicePrompter-owned processes. Other Node applications were not touched."
     goto :error
@@ -109,7 +109,7 @@ git reset --hard origin/devel >>"%VP_LOG%" 2>&1 || goto :error
 
 call :info "Verifying VoicePrompter esbuild executable is not locked..."
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$p=Join-Path $env:VP_REPO 'node_modules\@esbuild\win32-x64\esbuild.exe'; if(-not (Test-Path -LiteralPath $p)){ exit 0 }; try { $s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $s.Close(); exit 0 } catch { Add-Content -LiteralPath $env:VP_LOG -Value ('ERROR: VoicePrompter esbuild.exe is still locked: '+$_.Exception.Message); $all=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'esbuild.exe' }); foreach($x in $all){ Add-Content -LiteralPath $env:VP_LOG -Value ('  esbuild PID '+$x.ProcessId+' '+([string]$x.CommandLine)) }; exit 4 }" >>"%VP_LOG%" 2>&1
+  "$p=Join-Path $env:VP_REPO 'node_modules\@esbuild\win32-x64\esbuild.exe'; if(-not (Test-Path -LiteralPath $p)){ exit 0 }; try { $s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $s.Close(); exit 0 } catch { Write-Error ('VoicePrompter esbuild.exe is still locked: '+$_.Exception.Message); $all=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'esbuild.exe' }); foreach($x in $all){ Write-Output ('  esbuild PID '+$x.ProcessId+' '+([string]$x.CommandLine)) }; exit 4 }" >>"%VP_LOG%" 2>&1
 if errorlevel 1 (
     call :err "VoicePrompter esbuild.exe is still locked. No unrelated process was terminated; see upgrade.log."
     goto :error
