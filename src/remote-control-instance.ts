@@ -46,6 +46,20 @@ function updateStatusBarControlAvailability(): void {
         });
 }
 
+function watchStatusBarControlAvailability(socket: WebSocket): void {
+    const refresh = () => {
+        if (managedSocket !== socket) return;
+
+        updateStatusBarControlAvailability();
+
+        if (socket.readyState === NativeWebSocket.CONNECTING) {
+            window.setTimeout(refresh, 50);
+        }
+    };
+
+    refresh();
+}
+
 function updateRemoteControlStatus(
     icon: string,
     color: string,
@@ -309,9 +323,8 @@ class CoordinatedWebSocket extends NativeWebSocket {
         channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage);
 
         managedSocket = this;
-        updateStatusBarControlAvailability();
+        watchStatusBarControlAvailability(this);
 
-        this.addEventListener('open', updateStatusBarControlAvailability);
         this.addEventListener('close', () => {
             if (managedSocket === this) managedSocket = null;
             updateStatusBarControlAvailability();
