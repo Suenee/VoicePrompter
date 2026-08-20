@@ -97,15 +97,72 @@ if "%VP_DEV_WAS_RUNNING%"=="1" (
 call :info "Upgrade completed successfully."
 exit /b 0
 
+rem Working-tree policy:
+rem - Only unstaged modifications of known generated HTML artifacts may be cleaned.
+rem - Staged changes, source files, package-lock.json, untracked/deleted/renamed files,
+rem   or anything else are unsafe and MUST stop the upgrade without modifying them.
 :check_clean_tree
-git diff --quiet 2>nul || goto :dirty_sub
-git diff --cached --quiet 2>nul || goto :dirty_sub
+set "VP_HAS_SAFE_DIRTY=0"
+set "VP_HAS_UNSAFE_DIRTY=0"
+
+for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :inspect_dirty "%%L"
+
+if "%VP_HAS_UNSAFE_DIRTY%"=="1" goto :dirty_unsafe
+if not "%VP_HAS_SAFE_DIRTY%"=="1" exit /b 0
+
+call :warn "Only known generated web artifacts are modified. Restoring them safely..."
+for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :restore_safe_dirty "%%L"
+
+rem Verify cleanup really produced a clean tree. Never continue on assumption.
+for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do goto :dirty_after_cleanup
+call :info "Generated artifact cleanup completed; working tree is clean."
 exit /b 0
 
-:dirty_sub
-call :err "Local uncommitted changes were found."
-call :warn "Upgrade stopped to avoid overwriting your work."
-call :warn "Commit, stash, or discard the local changes and run upgrade.cmd again."
+:inspect_dirty
+set "VP_DIRTY_ENTRY=%~1"
+set "VP_DIRTY_STATUS=%VP_DIRTY_ENTRY:~0,2%"
+set "VP_DIRTY_PATH=%VP_DIRTY_ENTRY:~3%"
+call :is_safe_generated "%VP_DIRTY_STATUS%" "%VP_DIRTY_PATH%"
+if errorlevel 1 goto :inspect_unsafe
+set "VP_HAS_SAFE_DIRTY=1"
+exit /b 0
+
+:inspect_unsafe
+set "VP_HAS_UNSAFE_DIRTY=1"
+call :err "Unsafe local change: %VP_DIRTY_STATUS% %VP_DIRTY_PATH%"
+exit /b 0
+
+:is_safe_generated
+set "VP_CHECK_STATUS=%~1"
+set "VP_CHECK_PATH=%~2"
+
+rem Only ordinary unstaged modifications are ever auto-restored.
+if not "%VP_CHECK_STATUS%"==" M" exit /b 1
+if /I "%VP_CHECK_PATH%"=="changelog.html" exit /b 0
+if /I "%VP_CHECK_PATH:~0,5%"=="blog/" if /I "%VP_CHECK_PATH:~-5%"==".html" exit /b 0
+if /I "%VP_CHECK_PATH:~0,4%"=="mac/" if /I "%VP_CHECK_PATH:~-10%"=="index.html" exit /b 0
+exit /b 1
+
+:restore_safe_dirty
+set "VP_DIRTY_ENTRY=%~1"
+set "VP_DIRTY_STATUS=%VP_DIRTY_ENTRY:~0,2%"
+set "VP_DIRTY_PATH=%VP_DIRTY_ENTRY:~3%"
+call :is_safe_generated "%VP_DIRTY_STATUS%" "%VP_DIRTY_PATH%"
+if errorlevel 1 exit /b 0
+call :warn "Restoring generated artifact: %VP_DIRTY_PATH%"
+git restore -- "%VP_DIRTY_PATH%" >>"%VP_LOG%" 2>&1
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:dirty_unsafe
+call :err "Local changes outside the safe generated-artifact whitelist were found."
+call :warn "No local files were modified by the updater."
+call :warn "Review upgrade.log and resolve the listed files before running upgrade.cmd again."
+exit /b 1
+
+:dirty_after_cleanup
+call :err "Working tree is still dirty after safe generated-artifact cleanup."
+call :warn "Upgrade stopped rather than risking local work."
 exit /b 1
 
 :error
