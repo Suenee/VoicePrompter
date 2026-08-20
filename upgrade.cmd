@@ -26,7 +26,7 @@ for %%I in ("%VP_FRESH_UPDATER%") do if %%~zI LSS 1000 goto :bootstrap_extract_e
 
 rem cmd.exe label lookup is not reliable with LF-only batch files. Git stores text
 rem canonically with LF, so normalize the temporary executable copy explicitly.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:VP_FRESH_UPDATER; $t=[IO.File]::ReadAllText($p); $t=[Text.RegularExpressions.Regex]::Replace($t,'\r?\n','`r`n'); [IO.File]::WriteAllText($p,$t,(New-Object Text.UTF8Encoding($false)))" >nul 2>&1 || goto :bootstrap_extract_error
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:VP_FRESH_UPDATER; $t=[IO.File]::ReadAllText($p); $t=$t -replace \"`r?`n\",\"`r`n\"; [IO.File]::WriteAllText($p,$t,(New-Object Text.UTF8Encoding($false)))" >nul 2>&1 || goto :bootstrap_extract_error
 
 set "VP_UPGRADE_INTERNAL=1"
 set "VP_UPGRADE_STAGE=fresh"
