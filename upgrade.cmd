@@ -5,37 +5,43 @@ cd /d "%~dp0"
 set "VP_REPO=%CD%"
 set "VP_DEV_WAS_RUNNING=0"
 set "VP_DEV_PID="
+set "VP_LOCAL_UPDATER="
+set "VP_REMOTE_UPDATER="
 
 rem Self-update must happen before the updater performs application upgrade work.
-rem --self-updated prevents a restart loop after origin/devel has been applied.
-if /I not "%~1"=="--self-updated" (
-    echo [VoicePrompter] Checking upgrade.cmd version...
-    git fetch origin devel || goto :error
+rem Keep this flow outside parenthesized blocks: cmd.exe expands %%variables%% for an
+rem entire block before execution, and nested CALL after replacing this file can
+rem otherwise corrupt parsing of later PowerShell commands.
+if /I "%~1"=="--self-updated" goto :after_self_update
 
-    for /f "delims=" %%H in ('git rev-parse HEAD:upgrade.cmd 2^>nul') do set "VP_LOCAL_UPDATER=%%H"
-    for /f "delims=" %%H in ('git rev-parse origin/devel:upgrade.cmd 2^>nul') do set "VP_REMOTE_UPDATER=%%H"
+echo [VoicePrompter] Checking upgrade.cmd version...
+git fetch origin devel || goto :error
 
-    if not defined VP_REMOTE_UPDATER (
-        echo ERROR: Could not read upgrade.cmd from origin/devel.
-        goto :error
-    )
+for /f "delims=" %%H in ('git rev-parse HEAD:upgrade.cmd 2^>nul') do set "VP_LOCAL_UPDATER=%%H"
+for /f "delims=" %%H in ('git rev-parse origin/devel:upgrade.cmd 2^>nul') do set "VP_REMOTE_UPDATER=%%H"
 
-    if /I not "%VP_LOCAL_UPDATER%"=="%VP_REMOTE_UPDATER%" (
-        echo [VoicePrompter] A newer upgrade.cmd is available. Updating updater first...
+if not defined VP_REMOTE_UPDATER goto :self_update_read_error
+if /I "%VP_LOCAL_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :self_update_current
 
-        git diff --quiet || goto :dirty
-        git diff --cached --quiet || goto :dirty
-        git checkout devel || goto :error
-        git reset --hard origin/devel || goto :error
+echo [VoicePrompter] A newer upgrade.cmd is available. Updating updater first...
+call :check_clean_tree
+if errorlevel 1 goto :error
 
-        echo [VoicePrompter] Restarting with the current upgrade.cmd...
-        call "%~f0" --self-updated
-        exit /b %errorlevel%
-    )
+git checkout devel || goto :error
+git reset --hard origin/devel || goto :error
 
-    echo [VoicePrompter] upgrade.cmd is current.
-)
+echo [VoicePrompter] Restarting with the current upgrade.cmd...
+call "%~f0" --self-updated
+exit /b %errorlevel%
 
+:self_update_read_error
+echo ERROR: Could not read upgrade.cmd from origin/devel.
+goto :error
+
+:self_update_current
+echo [VoicePrompter] upgrade.cmd is current.
+
+:after_self_update
 echo [VoicePrompter] Checking dev server on port 5173...
 for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$repo=$env:VP_REPO; $c=Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue ^| Select-Object -First 1; if($c){$p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.OwningProcess) -ErrorAction SilentlyContinue; if($p -and $p.CommandLine -and $p.CommandLine.Contains($repo) -and $p.CommandLine -match 'vite'){Write-Output $p.ProcessId}}"`) do set "VP_DEV_PID=%%P"
 
@@ -53,8 +59,8 @@ if defined VP_DEV_PID (
 )
 
 echo [VoicePrompter] Checking local working tree...
-git diff --quiet || goto :dirty
-git diff --cached --quiet || goto :dirty
+call :check_clean_tree
+if errorlevel 1 goto :error
 
 echo [VoicePrompter] Switching to devel...
 git checkout devel || goto :error
@@ -87,12 +93,17 @@ echo.
 echo [VoicePrompter] Upgrade completed successfully.
 exit /b 0
 
-:dirty
+:check_clean_tree
+git diff --quiet 2>nul || goto :dirty_sub
+git diff --cached --quiet 2>nul || goto :dirty_sub
+exit /b 0
+
+:dirty_sub
 echo.
 echo ERROR: Local uncommitted changes were found.
 echo [VoicePrompter] Upgrade stopped to avoid overwriting your work.
 echo [VoicePrompter] Commit, stash, or discard the local changes and run upgrade.cmd again.
-goto :error
+exit /b 1
 
 :error
 if "%VP_DEV_WAS_RUNNING%"=="1" (
