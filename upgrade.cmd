@@ -1,20 +1,81 @@
 @echo off
-cls
-setlocal EnableExtensions
-cd /d "%~dp0"
+setlocal EnableExtensions EnableDelayedExpansion
 
-set "VP_REPO=%CD%"
-set "VP_LOG=%CD%\upgrade.log"
+rem ---------------------------------------------------------------------------
+rem NORMAL ENTRY / BOOTSTRAP
+rem The repository copy never replaces or executes itself after replacement.
+rem A fresh upgrade.cmd from origin/devel is extracted to TEMP and the real
+rem upgrade runs synchronously from that TEMP copy.
+rem ---------------------------------------------------------------------------
+if /I "%VP_UPGRADE_INTERNAL%"=="1" if /I "%VP_UPGRADE_STAGE%"=="fresh" goto :fresh_entry
+
+cls
+set "VP_BOOT_REPO=%~dp0"
+if "%VP_BOOT_REPO:~-1%"=="\" set "VP_BOOT_REPO=%VP_BOOT_REPO:~0,-1%"
+set "VP_BOOT_LOG=%VP_BOOT_REPO%\upgrade.log"
+set "VP_FRESH_UPDATER=%TEMP%\VoicePrompter-upgrade-%RANDOM%-%RANDOM%.cmd"
+
+cd /d "%VP_BOOT_REPO%" || goto :bootstrap_repo_error
+where git.exe >nul 2>&1 || goto :bootstrap_git_error
+git rev-parse --is-inside-work-tree >nul 2>&1 || goto :bootstrap_repo_error
+git fetch origin devel >nul 2>&1 || goto :bootstrap_fetch_error
+
+git show origin/devel:upgrade.cmd >"%VP_FRESH_UPDATER%" 2>nul || goto :bootstrap_extract_error
+if not exist "%VP_FRESH_UPDATER%" goto :bootstrap_extract_error
+for %%I in ("%VP_FRESH_UPDATER%") do if %%~zI LSS 1000 goto :bootstrap_extract_error
+
+set "VP_UPGRADE_INTERNAL=1"
+set "VP_UPGRADE_STAGE=fresh"
+set "VP_UPGRADE_REPO=%VP_BOOT_REPO%"
+
+"%ComSpec%" /d /s /c ""%VP_FRESH_UPDATER%""
+set "VP_BOOT_RC=%ERRORLEVEL%"
+del /q "%VP_FRESH_UPDATER%" >nul 2>&1
+endlocal & exit /b %VP_BOOT_RC%
+
+:bootstrap_repo_error
+set "VP_BOOT_ERROR=VoicePrompter repository could not be opened or is not a Git working tree."
+goto :bootstrap_fail
+
+:bootstrap_git_error
+set "VP_BOOT_ERROR=Git was not found in PATH."
+goto :bootstrap_fail
+
+:bootstrap_fetch_error
+set "VP_BOOT_ERROR=git fetch origin devel failed during bootstrap."
+goto :bootstrap_fail
+
+:bootstrap_extract_error
+set "VP_BOOT_ERROR=Could not extract the current upgrade.cmd from origin/devel to TEMP."
+if defined VP_FRESH_UPDATER del /q "%VP_FRESH_UPDATER%" >nul 2>&1
+goto :bootstrap_fail
+
+:bootstrap_fail
+>"%VP_BOOT_LOG%" echo [VoicePrompter] Upgrade bootstrap failed %date% %time%
+>>"%VP_BOOT_LOG%" echo ERROR: %VP_BOOT_ERROR%
+powershell -NoProfile -Command "Write-Host 'ERROR: %VP_BOOT_ERROR%' -ForegroundColor Red"
+endlocal & exit /b 1
+
+rem ---------------------------------------------------------------------------
+rem FRESH TEMP RUN
+rem This section is reached only by the current origin/devel copy running from
+rem TEMP. The repository upgrade.cmd may therefore be replaced safely by Git.
+rem ---------------------------------------------------------------------------
+:fresh_entry
+set "VP_REPO=%VP_UPGRADE_REPO%"
+if not defined VP_REPO exit /b 1
+cd /d "%VP_REPO%" || exit /b 1
+
+set "VP_LOG=%VP_REPO%\upgrade.log"
 set "VP_DEV_WAS_RUNNING=0"
 set "VP_DEV_STARTED=0"
 set "VP_DEV_PID="
-set "VP_LOCAL_UPDATER="
-set "VP_REMOTE_UPDATER="
-set "VP_UPDATER_TMP=%CD%\upgrade.cmd.new"
 set "VP_DEV_FLAG=%TEMP%\voiceprompter-upgrade-dev-%RANDOM%-%RANDOM%.flag"
 set "VP_LOCK_DIR=%TEMP%\voiceprompter-upgrade.lock"
 set "VP_LOCK_PID="
 set "VP_EXIT_CODE=1"
+set "VP_REMOTE_UPDATER="
+set "VP_LOCAL_UPDATER="
 
 rem Resolve the PID of this cmd.exe. It is the parent process of this PowerShell probe.
 for /f "delims=" %%P in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID)).ParentProcessId" 2^>nul') do set "VP_LOCK_PID=%%P"
@@ -23,62 +84,16 @@ if errorlevel 1 exit /b 1
 
 rem Start every manual upgrade with a fresh single-run log.
 >"%VP_LOG%" echo [VoicePrompter] Upgrade started %date% %time%
+call :info "Running current updater from a temporary bootstrap copy."
 
 rem The application upgrade is executed exactly once as a subroutine. All exits
-rem return here, where the lock is released once and the batch terminates.
+rem return here, where the lock is released once and the TEMP process terminates.
 call :main
 set "VP_EXIT_CODE=%ERRORLEVEL%"
 call :release_lock
 endlocal & exit /b %VP_EXIT_CODE%
 
 :main
-rem Bootstrap self-update is intentionally non-reentrant.
-rem If a newer updater is found, replace only upgrade.cmd and stop this run.
-rem The user then runs upgrade.cmd once more. Never CALL/START the replaced batch file.
-call :info "Checking upgrade.cmd version..."
-git fetch origin devel >>"%VP_LOG%" 2>&1 || goto :error
-
-for /f "delims=" %%H in ('git hash-object upgrade.cmd 2^>nul') do set "VP_LOCAL_UPDATER=%%H"
-for /f "delims=" %%H in ('git rev-parse origin/devel:upgrade.cmd 2^>nul') do set "VP_REMOTE_UPDATER=%%H"
-
-if not defined VP_REMOTE_UPDATER goto :self_update_read_error
-if /I "%VP_LOCAL_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :self_update_current
-
-call :warn "A newer upgrade.cmd is available. Updating updater only..."
-del /q "%VP_UPDATER_TMP%" >nul 2>&1
-
-git show origin/devel:upgrade.cmd >"%VP_UPDATER_TMP%" 2>>"%VP_LOG%"
-if errorlevel 1 goto :self_update_download_error
-
-for /f "delims=" %%H in ('git hash-object "%VP_UPDATER_TMP%" 2^>nul') do set "VP_DOWNLOADED_UPDATER=%%H"
-if /I not "%VP_DOWNLOADED_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :self_update_verify_error
-
-move /y "%VP_UPDATER_TMP%" "%~f0" >>"%VP_LOG%" 2>&1 || goto :self_update_replace_error
-call :warn "upgrade.cmd was updated successfully. Run upgrade.cmd once more to upgrade VoicePrompter."
-exit /b 10
-
-:self_update_read_error
-call :err "Could not read upgrade.cmd from origin/devel."
-goto :error
-
-:self_update_download_error
-call :err "Could not download the current upgrade.cmd from origin/devel."
-del /q "%VP_UPDATER_TMP%" >nul 2>&1
-goto :error
-
-:self_update_verify_error
-call :err "Downloaded upgrade.cmd did not match the expected Git blob."
-del /q "%VP_UPDATER_TMP%" >nul 2>&1
-goto :error
-
-:self_update_replace_error
-call :err "Could not replace the local upgrade.cmd."
-del /q "%VP_UPDATER_TMP%" >nul 2>&1
-goto :error
-
-:self_update_current
-call :info "upgrade.cmd is current."
-
 call :info "Checking for VoicePrompter-owned Node/esbuild processes..."
 del /q "%VP_DEV_FLAG%" >nul 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -124,6 +139,15 @@ git fetch origin devel >>"%VP_LOG%" 2>&1 || goto :error
 call :info "Synchronizing local devel with origin/devel..."
 git reset --hard origin/devel >>"%VP_LOG%" 2>&1 || goto :error
 
+rem Verify that the repository copy of the updater was updated by Git while the
+rem running copy remains isolated in TEMP.
+for /f "delims=" %%H in ('git rev-parse origin/devel:upgrade.cmd 2^>nul') do set "VP_REMOTE_UPDATER=%%H"
+for /f "delims=" %%H in ('git hash-object upgrade.cmd 2^>nul') do set "VP_LOCAL_UPDATER=%%H"
+if not defined VP_REMOTE_UPDATER goto :updater_sync_error
+if not defined VP_LOCAL_UPDATER goto :updater_sync_error
+if /I not "%VP_LOCAL_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :updater_sync_error
+call :info "Repository upgrade.cmd is synchronized with origin/devel."
+
 call :info "Verifying VoicePrompter esbuild executable is not locked..."
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$p=Join-Path $env:VP_REPO 'node_modules\@esbuild\win32-x64\esbuild.exe'; if(-not (Test-Path -LiteralPath $p)){ exit 0 }; try { $s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $s.Close(); exit 0 } catch { Write-Error ('VoicePrompter esbuild.exe is still locked: '+$_.Exception.Message); $all=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'esbuild.exe' }); foreach($x in $all){ Write-Output ('  esbuild PID '+$x.ProcessId+' '+([string]$x.CommandLine)) }; exit 4 }" >>"%VP_LOG%" 2>&1
@@ -155,11 +179,14 @@ if "%VP_DEV_WAS_RUNNING%"=="1" if "%VP_DEV_STARTED%"=="0" (
 call :info "Upgrade completed successfully."
 exit /b 0
 
+:updater_sync_error
+call :err "Repository upgrade.cmd does not match origin/devel after synchronization."
+goto :error
+
 rem Working-tree policy:
 rem - upgrade.log is an updater-owned transient file and may be ignored when untracked.
 rem - upgrade.cmd may be ignored only as an unstaged modification whose blob hash
-rem   exactly matches origin/devel:upgrade.cmd. This is the expected state immediately
-rem   after bootstrap self-update while local HEAD still points at the previous commit.
+rem   exactly matches origin/devel:upgrade.cmd.
 rem - Only unstaged modifications of known generated HTML artifacts may be cleaned.
 rem - Staged changes, source files, package-lock.json, untracked/deleted/renamed files,
 rem   or anything else are unsafe and MUST stop the upgrade without modifying them.
@@ -213,8 +240,8 @@ set "VP_CHECK_PATH=%~2"
 rem upgrade.log is safe only as an untracked updater-owned transient file.
 if "%VP_CHECK_STATUS%"=="??" if /I "%VP_CHECK_PATH%"=="upgrade.log" exit /b 0
 
-rem A self-updated upgrade.cmd is safe only when it is an ordinary unstaged
-rem modification and its content exactly equals the current origin/devel blob.
+rem A repository upgrade.cmd that already exactly equals origin/devel is an
+rem updater-owned safe modification even if local HEAD has not moved yet.
 if not "%VP_CHECK_STATUS%"==" M" exit /b 1
 if /I not "%VP_CHECK_PATH%"=="upgrade.cmd" exit /b 1
 
