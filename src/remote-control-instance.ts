@@ -34,6 +34,18 @@ function isVpBridgeSocket(url: string | URL): boolean {
     }
 }
 
+function updateStatusBarControlAvailability(): void {
+    const connected = managedSocket?.readyState === NativeWebSocket.OPEN;
+
+    document
+        .querySelectorAll<HTMLButtonElement>('[data-status-bar-position]')
+        .forEach(button => {
+            button.disabled = !connected;
+            button.style.opacity = connected ? '' : '0.45';
+            button.style.cursor = connected ? '' : 'not-allowed';
+        });
+}
+
 function updateRemoteControlStatus(
     icon: string,
     color: string,
@@ -50,6 +62,8 @@ function updateRemoteControlStatus(
 
     const track = document.getElementById('remoteControlToggleTrack');
     if (track) track.style.backgroundColor = trackColor;
+
+    updateStatusBarControlAvailability();
 }
 
 function updateTakenOverStatus(): void {
@@ -211,6 +225,7 @@ function relinquishRemoteControl(): void {
         }
     }
 
+    updateStatusBarControlAvailability();
     showTakeoverNotice();
     playTakeoverBeep();
 }
@@ -294,8 +309,12 @@ class CoordinatedWebSocket extends NativeWebSocket {
         channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage);
 
         managedSocket = this;
+        updateStatusBarControlAvailability();
+
+        this.addEventListener('open', updateStatusBarControlAvailability);
         this.addEventListener('close', () => {
             if (managedSocket === this) managedSocket = null;
+            updateStatusBarControlAvailability();
         });
     }
 
@@ -315,6 +334,8 @@ class CoordinatedWebSocket extends NativeWebSocket {
 if (channel) {
     window.WebSocket = CoordinatedWebSocket as typeof WebSocket;
 }
+
+window.addEventListener('DOMContentLoaded', updateStatusBarControlAvailability);
 
 export function isRemoteControlTakenOver(): boolean {
     return takenOver;
