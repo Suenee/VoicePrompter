@@ -26,7 +26,6 @@ type PublicMethod =
     | 'syncGoogleDoc'
     | 'setGoogleDocUrl'
     | 'setStatusBarMode'
-    | 'getStatusBarMode'
     | 'setStatusBarZoneCount'
     | 'setStatusBarZone'
     | 'clearStatusBar';
@@ -71,7 +70,6 @@ export class RemoteCommandHandler {
         syncGoogleDoc: args => this.syncGoogleDoc(args),
         setGoogleDocUrl: args => this.setGoogleDocUrl(args),
         setStatusBarMode: args => this.setStatusBarMode(args),
-        getStatusBarMode: args => this.getStatusBarMode(args),
         setStatusBarZoneCount: args => this.setStatusBarZoneCount(args),
         setStatusBarZone: args => this.setStatusBarZone(args),
         clearStatusBar: args => this.clearStatusBar(args)
@@ -217,7 +215,6 @@ export class RemoteCommandHandler {
             method === 'goStart' ||
             method === 'goFinish' ||
             method === 'syncGoogleDoc' ||
-            method === 'getStatusBarMode' ||
             method === 'clearStatusBar'
         ) {
             if (keys.length !== 0) return `${method} does not accept arguments`;
@@ -514,11 +511,6 @@ export class RemoteCommandHandler {
     public async setStatusBarMode(args: JsonObject): Promise<void> {
         const { setStatusBarMode } = await import('./remote-control');
         setStatusBarMode(args.mode as StatusBarMode);
-    }
-
-    public async getStatusBarMode(_args: JsonObject): Promise<JsonObject> {
-        const { getStatusBarMode } = await import('./remote-control');
-        return { mode: getStatusBarMode() };
     }
 
     public async setStatusBarZoneCount(args: JsonObject): Promise<void> {
