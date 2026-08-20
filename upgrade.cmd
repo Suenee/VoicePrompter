@@ -117,6 +117,10 @@ call :info "Upgrade completed successfully."
 exit /b 0
 
 rem Working-tree policy:
+rem - upgrade.log is an updater-owned transient file and may be ignored when untracked.
+rem - upgrade.cmd may be ignored only as an unstaged modification whose blob hash
+rem   exactly matches origin/devel:upgrade.cmd. This is the expected state immediately
+rem   after bootstrap self-update while local HEAD still points at the previous commit.
 rem - Only unstaged modifications of known generated HTML artifacts may be cleaned.
 rem - Staged changes, source files, package-lock.json, untracked/deleted/renamed files,
 rem   or anything else are unsafe and MUST stop the upgrade without modifying them.
@@ -127,20 +131,32 @@ set "VP_HAS_UNSAFE_DIRTY=0"
 for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :inspect_dirty "%%L"
 
 if "%VP_HAS_UNSAFE_DIRTY%"=="1" goto :dirty_unsafe
-if not "%VP_HAS_SAFE_DIRTY%"=="1" exit /b 0
+if not "%VP_HAS_SAFE_DIRTY%"=="1" goto :working_tree_safe
 
 call :warn "Only known generated web artifacts are modified. Restoring them safely..."
 for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :restore_safe_dirty "%%L"
 
-rem Verify cleanup really produced a clean tree. Never continue on assumption.
-for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do goto :dirty_after_cleanup
-call :info "Generated artifact cleanup completed; working tree is clean."
+rem Re-evaluate from scratch. Internal updater files may still be present, but no
+rem generated artifact or unsafe user change may remain.
+set "VP_HAS_SAFE_DIRTY=0"
+set "VP_HAS_UNSAFE_DIRTY=0"
+for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :inspect_dirty "%%L"
+if "%VP_HAS_UNSAFE_DIRTY%"=="1" goto :dirty_after_cleanup
+if "%VP_HAS_SAFE_DIRTY%"=="1" goto :dirty_after_cleanup
+call :info "Generated artifact cleanup completed."
+
+:working_tree_safe
+call :info "Working tree contains no unsafe local changes."
 exit /b 0
 
 :inspect_dirty
 set "VP_DIRTY_ENTRY=%~1"
 set "VP_DIRTY_STATUS=%VP_DIRTY_ENTRY:~0,2%"
 set "VP_DIRTY_PATH=%VP_DIRTY_ENTRY:~3%"
+
+call :is_internal_updater_file "%VP_DIRTY_STATUS%" "%VP_DIRTY_PATH%"
+if not errorlevel 1 exit /b 0
+
 call :is_safe_generated "%VP_DIRTY_STATUS%" "%VP_DIRTY_PATH%"
 if errorlevel 1 goto :inspect_unsafe
 set "VP_HAS_SAFE_DIRTY=1"
@@ -150,6 +166,27 @@ exit /b 0
 set "VP_HAS_UNSAFE_DIRTY=1"
 call :err "Unsafe local change: %VP_DIRTY_STATUS% %VP_DIRTY_PATH%"
 exit /b 0
+
+:is_internal_updater_file
+set "VP_CHECK_STATUS=%~1"
+set "VP_CHECK_PATH=%~2"
+
+rem upgrade.log is safe only as an untracked updater-owned transient file.
+if "%VP_CHECK_STATUS%"=="??" if /I "%VP_CHECK_PATH%"=="upgrade.log" exit /b 0
+
+rem A self-updated upgrade.cmd is safe only when it is an ordinary unstaged
+rem modification and its content exactly equals the current origin/devel blob.
+if not "%VP_CHECK_STATUS%"==" M" exit /b 1
+if /I not "%VP_CHECK_PATH%"=="upgrade.cmd" exit /b 1
+
+set "VP_CURRENT_UPDATER_HASH="
+set "VP_EXPECTED_UPDATER_HASH="
+for /f "delims=" %%H in ('git hash-object upgrade.cmd 2^>nul') do set "VP_CURRENT_UPDATER_HASH=%%H"
+for /f "delims=" %%H in ('git rev-parse origin/devel:upgrade.cmd 2^>nul') do set "VP_EXPECTED_UPDATER_HASH=%%H"
+if not defined VP_CURRENT_UPDATER_HASH exit /b 1
+if not defined VP_EXPECTED_UPDATER_HASH exit /b 1
+if /I "%VP_CURRENT_UPDATER_HASH%"=="%VP_EXPECTED_UPDATER_HASH%" exit /b 0
+exit /b 1
 
 :is_safe_generated
 set "VP_CHECK_STATUS=%~1"
@@ -180,7 +217,7 @@ call :warn "Review upgrade.log and resolve the listed files before running upgra
 exit /b 1
 
 :dirty_after_cleanup
-call :err "Working tree is still dirty after safe generated-artifact cleanup."
+call :err "Working tree still contains unexpected changes after safe generated-artifact cleanup."
 call :warn "Upgrade stopped rather than risking local work."
 exit /b 1
 
