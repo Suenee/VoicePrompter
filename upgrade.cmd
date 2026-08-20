@@ -8,31 +8,35 @@ set "VP_DEV_WAS_RUNNING=0"
 set "VP_DEV_PID="
 set "VP_LOCAL_UPDATER="
 set "VP_REMOTE_UPDATER="
+set "VP_UPDATER_TMP=%CD%\upgrade.cmd.new"
 
 rem Start every top-level upgrade with a fresh single-run log.
 if /I not "%~1"=="--self-updated" >"%VP_LOG%" echo [VoicePrompter] Upgrade started %date% %time%
 
-rem Self-update must happen before the updater performs application upgrade work.
-rem Keep this flow outside parenthesized blocks: cmd.exe expands %%variables%% for an
-rem entire block before execution, and nested CALL after replacing this file can
-rem otherwise corrupt parsing of later PowerShell commands.
+rem Bootstrap self-update first and independently of the rest of the working tree.
+rem Only upgrade.cmd itself is replaced here. Working-tree safety checks happen
+rem after the restarted updater is running.
 if /I "%~1"=="--self-updated" goto :after_self_update
 
 call :info "Checking upgrade.cmd version..."
 git fetch origin devel >>"%VP_LOG%" 2>&1 || goto :error
 
-for /f "delims=" %%H in ('git rev-parse HEAD:upgrade.cmd 2^>nul') do set "VP_LOCAL_UPDATER=%%H"
+for /f "delims=" %%H in ('git hash-object upgrade.cmd 2^>nul') do set "VP_LOCAL_UPDATER=%%H"
 for /f "delims=" %%H in ('git rev-parse origin/devel:upgrade.cmd 2^>nul') do set "VP_REMOTE_UPDATER=%%H"
 
 if not defined VP_REMOTE_UPDATER goto :self_update_read_error
 if /I "%VP_LOCAL_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :self_update_current
 
 call :warn "A newer upgrade.cmd is available. Updating updater first..."
-call :check_clean_tree
-if errorlevel 1 goto :error
+del /q "%VP_UPDATER_TMP%" >nul 2>&1
 
-git checkout devel >>"%VP_LOG%" 2>&1 || goto :error
-git reset --hard origin/devel >>"%VP_LOG%" 2>&1 || goto :error
+git show origin/devel:upgrade.cmd >"%VP_UPDATER_TMP%" 2>>"%VP_LOG%"
+if errorlevel 1 goto :self_update_download_error
+
+for /f "delims=" %%H in ('git hash-object "%VP_UPDATER_TMP%" 2^>nul') do set "VP_DOWNLOADED_UPDATER=%%H"
+if /I not "%VP_DOWNLOADED_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :self_update_verify_error
+
+move /y "%VP_UPDATER_TMP%" "%~f0" >>"%VP_LOG%" 2>&1 || goto :self_update_replace_error
 
 call :info "Restarting with the current upgrade.cmd..."
 call "%~f0" --self-updated
@@ -40,6 +44,21 @@ exit /b %errorlevel%
 
 :self_update_read_error
 call :err "Could not read upgrade.cmd from origin/devel."
+goto :error
+
+:self_update_download_error
+call :err "Could not download the current upgrade.cmd from origin/devel."
+del /q "%VP_UPDATER_TMP%" >nul 2>&1
+goto :error
+
+:self_update_verify_error
+call :err "Downloaded upgrade.cmd did not match the expected Git blob."
+del /q "%VP_UPDATER_TMP%" >nul 2>&1
+goto :error
+
+:self_update_replace_error
+call :err "Could not replace the local upgrade.cmd."
+del /q "%VP_UPDATER_TMP%" >nul 2>&1
 goto :error
 
 :self_update_current
