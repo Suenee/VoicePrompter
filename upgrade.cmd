@@ -9,6 +9,7 @@ set "VP_DEV_PID="
 set "VP_LOCAL_UPDATER="
 set "VP_REMOTE_UPDATER="
 set "VP_UPDATER_TMP=%CD%\upgrade.cmd.new"
+set "VP_DEV_FLAG=%TEMP%\voiceprompter-upgrade-dev-%RANDOM%-%RANDOM%.flag"
 
 rem Start every top-level upgrade with a fresh single-run log.
 if /I not "%~1"=="--self-updated" >"%VP_LOG%" echo [VoicePrompter] Upgrade started %date% %time%
@@ -65,21 +66,33 @@ goto :error
 call :info "upgrade.cmd is current."
 
 :after_self_update
-call :info "Checking dev server on port 5173..."
-for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$repo=$env:VP_REPO; $c=Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue ^| Select-Object -First 1; if($c){$p=Get-CimInstance Win32_Process -Filter ('ProcessId='+$c.OwningProcess) -ErrorAction SilentlyContinue; if($p -and $p.CommandLine -and $p.CommandLine.Contains($repo) -and $p.CommandLine -match 'vite'){Write-Output $p.ProcessId}}"`) do set "VP_DEV_PID=%%P"
-
-if defined VP_DEV_PID (
-    call :info "VoicePrompter dev server detected, PID %VP_DEV_PID%. Stopping it safely..."
-    taskkill /PID %VP_DEV_PID% /T /F >>"%VP_LOG%" 2>&1
-    if errorlevel 1 (
-        call :err "Could not stop VoicePrompter dev server PID %VP_DEV_PID%."
-        goto :error
-    )
-    set "VP_DEV_WAS_RUNNING=1"
-) else (
-    call :info "No verified VoicePrompter dev server is running on port 5173."
-    call :info "Other Node processes will not be touched."
+call :info "Checking for VoicePrompter-owned Node/esbuild processes..."
+del /q "%VP_DEV_FLAG%" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop'; $repo=[IO.Path]::GetFullPath($env:VP_REPO).TrimEnd('\').ToLowerInvariant(); $flag=$env:VP_DEV_FLAG; $log=$env:VP_LOG;" ^
+  "$all=@(Get-CimInstance Win32_Process);" ^
+  "$owned=@($all ^| Where-Object { $n=$_.Name.ToLowerInvariant(); $cl=[string]$_.CommandLine; $ep=[string]$_.ExecutablePath; (($n -eq 'node.exe') -or ($n -eq 'esbuild.exe')) -and ((($cl.ToLowerInvariant()).Contains($repo)) -or (($ep.ToLowerInvariant()).Contains($repo))) });" ^
+  "$vite=@($owned ^| Where-Object { $_.Name -ieq 'node.exe' -and ([string]$_.CommandLine) -match '(?i)(^|[\\/])vite([\\/]|\.|\s|$)' });" ^
+  "if($vite.Count -gt 0){ Set-Content -LiteralPath $flag -Value '1' -NoNewline };" ^
+  "if($owned.Count -eq 0){ Add-Content -LiteralPath $log -Value '[VoicePrompter] No VoicePrompter-owned Node/esbuild processes detected.'; exit 0 };" ^
+  "Add-Content -LiteralPath $log -Value '[VoicePrompter] VoicePrompter-owned processes selected for shutdown:'; foreach($p in $owned){ Add-Content -LiteralPath $log -Value ('  PID '+$p.ProcessId+' '+$p.Name+' '+([string]$p.CommandLine)) };" ^
+  "$ids=New-Object 'System.Collections.Generic.HashSet[int]'; foreach($p in $owned){ [void]$ids.Add([int]$p.ProcessId) };" ^
+  "$changed=$true; while($changed){ $changed=$false; foreach($p in $all){ if($ids.Contains([int]$p.ParentProcessId) -and -not $ids.Contains([int]$p.ProcessId)){ [void]$ids.Add([int]$p.ProcessId); $changed=$true } } };" ^
+  "$targets=@($all ^| Where-Object { $ids.Contains([int]$_.ProcessId) } ^| Sort-Object ProcessId -Descending); foreach($p in $targets){ try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop; Add-Content -LiteralPath $log -Value ('[VoicePrompter] Stopped PID '+$p.ProcessId+' '+$p.Name) } catch { Add-Content -LiteralPath $log -Value ('ERROR: Could not stop PID '+$p.ProcessId+' '+$p.Name+': '+$_.Exception.Message); exit 2 } };" ^
+  "$deadline=(Get-Date).AddSeconds(5); do { Start-Sleep -Milliseconds 200; $left=@(Get-CimInstance Win32_Process ^| Where-Object { $ids.Contains([int]$_.ProcessId) }) } while($left.Count -gt 0 -and (Get-Date) -lt $deadline);" ^
+  "if($left.Count -gt 0){ foreach($p in $left){ Add-Content -LiteralPath $log -Value ('ERROR: Process still running: PID '+$p.ProcessId+' '+$p.Name) }; exit 3 }; exit 0" >>"%VP_LOG%" 2>&1
+if errorlevel 1 (
+    call :err "Could not safely stop VoicePrompter-owned processes. Other Node applications were not touched."
+    goto :error
 )
+if exist "%VP_DEV_FLAG%" (
+    set "VP_DEV_WAS_RUNNING=1"
+    del /q "%VP_DEV_FLAG%" >nul 2>&1
+    call :info "VoicePrompter dev server was running and its verified process tree was stopped."
+) else (
+    call :info "No verified VoicePrompter dev server was running."
+)
+call :info "Companion, VoicePrompter Bridge, and unrelated Node processes were not touched."
 
 call :info "Checking local working tree..."
 call :check_clean_tree
@@ -93,6 +106,14 @@ git fetch origin devel >>"%VP_LOG%" 2>&1 || goto :error
 
 call :info "Synchronizing local devel with origin/devel..."
 git reset --hard origin/devel >>"%VP_LOG%" 2>&1 || goto :error
+
+call :info "Verifying VoicePrompter esbuild executable is not locked..."
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$p=Join-Path $env:VP_REPO 'node_modules\@esbuild\win32-x64\esbuild.exe'; if(-not (Test-Path -LiteralPath $p)){ exit 0 }; try { $s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $s.Close(); exit 0 } catch { Add-Content -LiteralPath $env:VP_LOG -Value ('ERROR: VoicePrompter esbuild.exe is still locked: '+$_.Exception.Message); $all=@(Get-CimInstance Win32_Process ^| Where-Object { $_.Name -ieq 'esbuild.exe' }); foreach($x in $all){ Add-Content -LiteralPath $env:VP_LOG -Value ('  esbuild PID '+$x.ProcessId+' '+([string]$x.CommandLine)) }; exit 4 }" >>"%VP_LOG%" 2>&1
+if errorlevel 1 (
+    call :err "VoicePrompter esbuild.exe is still locked. No unrelated process was terminated; see upgrade.log."
+    goto :error
+)
 
 call :info "Installing dependencies from package-lock.json..."
 call npm ci >>"%VP_LOG%" 2>&1 || goto :error
@@ -222,6 +243,7 @@ call :warn "Upgrade stopped rather than risking local work."
 exit /b 1
 
 :error
+if exist "%VP_DEV_FLAG%" del /q "%VP_DEV_FLAG%" >nul 2>&1
 if "%VP_DEV_WAS_RUNNING%"=="1" (
     call :warn "Upgrade failed. Restarting the previously running dev server..."
     start "VoicePrompter DEV" cmd /k "cd /d "%VP_REPO%" && npm run dev"
