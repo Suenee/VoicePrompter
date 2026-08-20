@@ -3,9 +3,9 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 rem ---------------------------------------------------------------------------
 rem NORMAL ENTRY / BOOTSTRAP
-rem The repository copy never replaces or executes itself after replacement.
-rem A fresh upgrade.cmd from origin/devel is extracted to TEMP and the real
-rem upgrade runs synchronously from that TEMP copy.
+rem The repository copy never replaces itself while it is running.
+rem A fresh upgrade.cmd from origin/devel is extracted to TEMP, normalized to
+rem CRLF, and the real upgrade runs synchronously from that TEMP copy.
 rem ---------------------------------------------------------------------------
 if /I "%VP_UPGRADE_INTERNAL%"=="1" if /I "%VP_UPGRADE_STAGE%"=="fresh" goto :fresh_entry
 
@@ -23,6 +23,10 @@ git fetch origin devel >nul 2>&1 || goto :bootstrap_fetch_error
 git show origin/devel:upgrade.cmd >"%VP_FRESH_UPDATER%" 2>nul || goto :bootstrap_extract_error
 if not exist "%VP_FRESH_UPDATER%" goto :bootstrap_extract_error
 for %%I in ("%VP_FRESH_UPDATER%") do if %%~zI LSS 1000 goto :bootstrap_extract_error
+
+rem cmd.exe label lookup is not reliable with LF-only batch files. Git stores text
+rem canonically with LF, so normalize the temporary executable copy explicitly.
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:VP_FRESH_UPDATER; $t=[IO.File]::ReadAllText($p); $t=[Text.RegularExpressions.Regex]::Replace($t,'\r?\n','`r`n'); [IO.File]::WriteAllText($p,$t,(New-Object Text.UTF8Encoding($false)))" >nul 2>&1 || goto :bootstrap_extract_error
 
 set "VP_UPGRADE_INTERNAL=1"
 set "VP_UPGRADE_STAGE=fresh"
@@ -46,7 +50,7 @@ set "VP_BOOT_ERROR=git fetch origin devel failed during bootstrap."
 goto :bootstrap_fail
 
 :bootstrap_extract_error
-set "VP_BOOT_ERROR=Could not extract the current upgrade.cmd from origin/devel to TEMP."
+set "VP_BOOT_ERROR=Could not prepare the current upgrade.cmd from origin/devel in TEMP."
 if defined VP_FRESH_UPDATER del /q "%VP_FRESH_UPDATER%" >nul 2>&1
 goto :bootstrap_fail
 
@@ -58,10 +62,9 @@ endlocal & exit /b 1
 
 rem ---------------------------------------------------------------------------
 rem FRESH TEMP RUN
-rem This section is reached only by the current origin/devel copy running from
-rem TEMP. The repository upgrade.cmd may therefore be replaced safely by Git.
 rem ---------------------------------------------------------------------------
 :fresh_entry
+cls
 set "VP_REPO=%VP_UPGRADE_REPO%"
 if not defined VP_REPO exit /b 1
 cd /d "%VP_REPO%" || exit /b 1
@@ -69,7 +72,6 @@ cd /d "%VP_REPO%" || exit /b 1
 set "VP_LOG=%VP_REPO%\upgrade.log"
 set "VP_DEV_WAS_RUNNING=0"
 set "VP_DEV_STARTED=0"
-set "VP_DEV_PID="
 set "VP_DEV_FLAG=%TEMP%\voiceprompter-upgrade-dev-%RANDOM%-%RANDOM%.flag"
 set "VP_LOCK_DIR=%TEMP%\voiceprompter-upgrade.lock"
 set "VP_LOCK_PID="
@@ -77,17 +79,13 @@ set "VP_EXIT_CODE=1"
 set "VP_REMOTE_UPDATER="
 set "VP_LOCAL_UPDATER="
 
-rem Resolve the PID of this cmd.exe. It is the parent process of this PowerShell probe.
 for /f "delims=" %%P in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID)).ParentProcessId" 2^>nul') do set "VP_LOCK_PID=%%P"
 call :acquire_lock
 if errorlevel 1 exit /b 1
 
-rem Start every manual upgrade with a fresh single-run log.
 >"%VP_LOG%" echo [VoicePrompter] Upgrade started %date% %time%
-call :info "Running current updater from a temporary bootstrap copy."
+call :info "Running current updater from a CRLF-normalized temporary copy."
 
-rem The application upgrade is executed exactly once as a subroutine. All exits
-rem return here, where the lock is released once and the TEMP process terminates.
 call :main
 set "VP_EXIT_CODE=%ERRORLEVEL%"
 call :release_lock
@@ -99,7 +97,7 @@ del /q "%VP_DEV_FLAG%" >nul 2>&1
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop'; $repo=[IO.Path]::GetFullPath($env:VP_REPO).TrimEnd('\').ToLowerInvariant(); $flag=$env:VP_DEV_FLAG;" ^
   "$all=@(Get-CimInstance Win32_Process);" ^
-  "$owned=@($all | Where-Object { $n=$_.Name.ToLowerInvariant(); $cl=[string]$_.CommandLine; $ep=[string]$_.ExecutablePath; (($n -eq 'node.exe') -or ($n -eq 'esbuild.exe')) -and ((($cl.ToLowerInvariant()).Contains($repo)) -or (($ep.ToLowerInvariant()).Contains($repo))) });" ^
+  "$owned=@($all | Where-Object { $n=$_.Name.ToLowerInvariant(); $cl=[string]$_.CommandLine; $ep=[string]$_.ExecutablePath; (($n -eq 'node.exe') -or ($n -eq 'esbuild.exe')) -and (($cl.ToLowerInvariant().Contains($repo)) -or ($ep.ToLowerInvariant().Contains($repo))) });" ^
   "$vite=@($owned | Where-Object { $_.Name -ieq 'node.exe' -and ([string]$_.CommandLine) -match '(?i)(^|[\\/])vite([\\/]|\.|\s|$)' });" ^
   "if($vite.Count -gt 0){ Set-Content -LiteralPath $flag -Value '1' -NoNewline };" ^
   "if($owned.Count -eq 0){ Write-Output '[VoicePrompter] No VoicePrompter-owned Node/esbuild processes detected.'; exit 0 };" ^
@@ -139,8 +137,6 @@ git fetch origin devel >>"%VP_LOG%" 2>&1 || goto :error
 call :info "Synchronizing local devel with origin/devel..."
 git reset --hard origin/devel >>"%VP_LOG%" 2>&1 || goto :error
 
-rem Verify that the repository copy of the updater was updated by Git while the
-rem running copy remains isolated in TEMP.
 for /f "delims=" %%H in ('git rev-parse origin/devel:upgrade.cmd 2^>nul') do set "VP_REMOTE_UPDATER=%%H"
 for /f "delims=" %%H in ('git hash-object upgrade.cmd 2^>nul') do set "VP_LOCAL_UPDATER=%%H"
 if not defined VP_REMOTE_UPDATER goto :updater_sync_error
@@ -183,27 +179,15 @@ exit /b 0
 call :err "Repository upgrade.cmd does not match origin/devel after synchronization."
 goto :error
 
-rem Working-tree policy:
-rem - upgrade.log is an updater-owned transient file and may be ignored when untracked.
-rem - upgrade.cmd may be ignored only as an unstaged modification whose blob hash
-rem   exactly matches origin/devel:upgrade.cmd.
-rem - Only unstaged modifications of known generated HTML artifacts may be cleaned.
-rem - Staged changes, source files, package-lock.json, untracked/deleted/renamed files,
-rem   or anything else are unsafe and MUST stop the upgrade without modifying them.
 :check_clean_tree
 set "VP_HAS_SAFE_DIRTY=0"
 set "VP_HAS_UNSAFE_DIRTY=0"
-
 for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :inspect_dirty "%%L"
-
 if "%VP_HAS_UNSAFE_DIRTY%"=="1" goto :dirty_unsafe
 if not "%VP_HAS_SAFE_DIRTY%"=="1" goto :working_tree_safe
 
 call :warn "Only known generated web artifacts are modified. Restoring them safely..."
 for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :restore_safe_dirty "%%L"
-
-rem Re-evaluate from scratch. Internal updater files may still be present, but no
-rem generated artifact or unsafe user change may remain.
 set "VP_HAS_SAFE_DIRTY=0"
 set "VP_HAS_UNSAFE_DIRTY=0"
 for /f "delims=" %%L in ('git status --porcelain --untracked-files^=all 2^>nul') do call :inspect_dirty "%%L"
@@ -219,10 +203,8 @@ exit /b 0
 set "VP_DIRTY_ENTRY=%~1"
 set "VP_DIRTY_STATUS=%VP_DIRTY_ENTRY:~0,2%"
 set "VP_DIRTY_PATH=%VP_DIRTY_ENTRY:~3%"
-
 call :is_internal_updater_file "%VP_DIRTY_STATUS%" "%VP_DIRTY_PATH%"
 if not errorlevel 1 exit /b 0
-
 call :is_safe_generated "%VP_DIRTY_STATUS%" "%VP_DIRTY_PATH%"
 if errorlevel 1 goto :inspect_unsafe
 set "VP_HAS_SAFE_DIRTY=1"
@@ -236,15 +218,9 @@ exit /b 0
 :is_internal_updater_file
 set "VP_CHECK_STATUS=%~1"
 set "VP_CHECK_PATH=%~2"
-
-rem upgrade.log is safe only as an untracked updater-owned transient file.
 if "%VP_CHECK_STATUS%"=="??" if /I "%VP_CHECK_PATH%"=="upgrade.log" exit /b 0
-
-rem A repository upgrade.cmd that already exactly equals origin/devel is an
-rem updater-owned safe modification even if local HEAD has not moved yet.
 if not "%VP_CHECK_STATUS%"==" M" exit /b 1
 if /I not "%VP_CHECK_PATH%"=="upgrade.cmd" exit /b 1
-
 set "VP_CURRENT_UPDATER_HASH="
 set "VP_EXPECTED_UPDATER_HASH="
 for /f "delims=" %%H in ('git hash-object upgrade.cmd 2^>nul') do set "VP_CURRENT_UPDATER_HASH=%%H"
@@ -257,8 +233,6 @@ exit /b 1
 :is_safe_generated
 set "VP_CHECK_STATUS=%~1"
 set "VP_CHECK_PATH=%~2"
-
-rem Only ordinary unstaged modifications are ever auto-restored.
 if not "%VP_CHECK_STATUS%"==" M" exit /b 1
 if /I "%VP_CHECK_PATH%"=="changelog.html" exit /b 0
 if /I "%VP_CHECK_PATH:~0,5%"=="blog/" if /I "%VP_CHECK_PATH:~-5%"==".html" exit /b 0
@@ -316,7 +290,6 @@ if defined VP_EXISTING_LOCK_PID (
         exit /b 1
     )
 )
-rem Stale lock left after a killed/crashed updater. Remove it and retry once.
 rmdir /s /q "%VP_LOCK_DIR%" >nul 2>&1
 mkdir "%VP_LOCK_DIR%" >nul 2>&1
 if errorlevel 1 (
