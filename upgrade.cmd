@@ -1,10 +1,12 @@
 @echo off
+cls
 setlocal EnableExtensions
 cd /d "%~dp0"
 
 set "VP_REPO=%CD%"
 set "VP_LOG=%CD%\upgrade.log"
 set "VP_DEV_WAS_RUNNING=0"
+set "VP_DEV_STARTED=0"
 set "VP_DEV_PID="
 set "VP_LOCAL_UPDATER="
 set "VP_REMOTE_UPDATER="
@@ -12,6 +14,7 @@ set "VP_UPDATER_TMP=%CD%\upgrade.cmd.new"
 set "VP_DEV_FLAG=%TEMP%\voiceprompter-upgrade-dev-%RANDOM%-%RANDOM%.flag"
 set "VP_LOCK_DIR=%TEMP%\voiceprompter-upgrade.lock"
 set "VP_LOCK_PID="
+set "VP_EXIT_CODE=1"
 
 rem Resolve the PID of this cmd.exe. It is the parent process of this PowerShell probe.
 for /f "delims=" %%P in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter ('ProcessId='+$PID)).ParentProcessId" 2^>nul') do set "VP_LOCK_PID=%%P"
@@ -21,8 +24,16 @@ if errorlevel 1 exit /b 1
 rem Start every manual upgrade with a fresh single-run log.
 >"%VP_LOG%" echo [VoicePrompter] Upgrade started %date% %time%
 
+rem The application upgrade is executed exactly once as a subroutine. All exits
+rem return here, where the lock is released once and the batch terminates.
+call :main
+set "VP_EXIT_CODE=%ERRORLEVEL%"
+call :release_lock
+endlocal & exit /b %VP_EXIT_CODE%
+
+:main
 rem Bootstrap self-update is intentionally non-reentrant.
-rem If a newer updater is found, replace only upgrade.cmd, release the lock, and stop.
+rem If a newer updater is found, replace only upgrade.cmd and stop this run.
 rem The user then runs upgrade.cmd once more. Never CALL/START the replaced batch file.
 call :info "Checking upgrade.cmd version..."
 git fetch origin devel >>"%VP_LOG%" 2>&1 || goto :error
@@ -44,7 +55,6 @@ if /I not "%VP_DOWNLOADED_UPDATER%"=="%VP_REMOTE_UPDATER%" goto :self_update_ver
 
 move /y "%VP_UPDATER_TMP%" "%~f0" >>"%VP_LOG%" 2>&1 || goto :self_update_replace_error
 call :warn "upgrade.cmd was updated successfully. Run upgrade.cmd once more to upgrade VoicePrompter."
-call :release_lock
 exit /b 10
 
 :self_update_read_error
@@ -129,7 +139,8 @@ call :info "Building VoicePrompter application..."
 call npx tsc >>"%VP_LOG%" 2>&1 || goto :error
 call npx vite build >>"%VP_LOG%" 2>&1 || goto :error
 
-if "%VP_DEV_WAS_RUNNING%"=="1" (
+if "%VP_DEV_WAS_RUNNING%"=="1" if "%VP_DEV_STARTED%"=="0" (
+    set "VP_DEV_STARTED=1"
     call :info "Starting dev server in a separate terminal..."
     start "VoicePrompter DEV" cmd /k "cd /d "%VP_REPO%" && npm run dev"
     timeout /t 2 /nobreak >nul
@@ -142,7 +153,6 @@ if "%VP_DEV_WAS_RUNNING%"=="1" (
 )
 
 call :info "Upgrade completed successfully."
-call :release_lock
 exit /b 0
 
 rem Working-tree policy:
@@ -295,12 +305,12 @@ exit /b 0
 
 :error
 if exist "%VP_DEV_FLAG%" del /q "%VP_DEV_FLAG%" >nul 2>&1
-if "%VP_DEV_WAS_RUNNING%"=="1" (
+if "%VP_DEV_WAS_RUNNING%"=="1" if "%VP_DEV_STARTED%"=="0" (
+    set "VP_DEV_STARTED=1"
     call :warn "Upgrade failed. Restarting the previously running dev server..."
     start "VoicePrompter DEV" cmd /k "cd /d "%VP_REPO%" && npm run dev"
 )
 call :err "Upgrade FAILED. See upgrade.log for details."
-call :release_lock
 exit /b 1
 
 :info
