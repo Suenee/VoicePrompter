@@ -97,6 +97,10 @@ if exist "%VP_DEV_FLAG%" (
 )
 call :info "Companion, VoicePrompter Bridge, and unrelated Node processes were not touched."
 
+call :info "Cleaning known safe Vite temporary artifacts..."
+call :cleanup_safe_transients
+if errorlevel 1 goto :error
+
 call :info "Checking local working tree..."
 call :check_clean_tree
 if errorlevel 1 goto :error
@@ -233,6 +237,16 @@ if errorlevel 1 exit /b 0
 call :warn "Restoring generated artifact: %VP_DIRTY_PATH%"
 git restore -- "%VP_DIRTY_PATH%" >>"%VP_LOG%" 2>&1
 if errorlevel 1 exit /b 1
+exit /b 0
+
+:cleanup_safe_transients
+for %%F in ("vite.config.ts.timestamp-*.mjs") do (
+    if exist "%%~fF" (
+        call :warn "Removing Vite temporary artifact: %%~nxF"
+        del /q "%%~fF" >>"%VP_LOG%" 2>&1
+        if errorlevel 1 exit /b 1
+    )
+)
 exit /b 0
 
 :dirty_unsafe
