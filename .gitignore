@@ -8,5 +8,8 @@ dist/
 
 .obsidian/
 
+# Local updater diagnostic log
+upgrade.log
+
 # Claude Cowork artifact
 AGENTS.md
