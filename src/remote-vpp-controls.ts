@@ -73,6 +73,7 @@ export async function syncGoogleDoc(): Promise<void> {
     await syncGoogleDocNow();
 }
 
-export function setGoogleDocUrl(url: string): void {
+export async function setGoogleDocUrl(url: string): Promise<void> {
     setGoogleDocSourceUrl(url);
+    await syncGoogleDocNow();
 }
