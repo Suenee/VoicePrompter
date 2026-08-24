@@ -505,7 +505,7 @@ export class RemoteCommandHandler {
 
     public async setGoogleDocUrl(args: JsonObject): Promise<void> {
         const controls = await import('./remote-vpp-controls');
-        controls.setGoogleDocUrl((args.url as string).trim());
+        await controls.setGoogleDocUrl((args.url as string).trim());
     }
 
     public async setStatusBarMode(args: JsonObject): Promise<void> {
