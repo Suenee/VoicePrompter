@@ -1,3 +1,5 @@
+import './cursor-autohide';
+
 export interface Elements {
     setupScreen: HTMLElement;
     prompterContainer: HTMLElement;
