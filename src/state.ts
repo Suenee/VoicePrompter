@@ -2,14 +2,74 @@ import { AppConfig, AppState } from './types';
 import { DEFAULT_APP_CONFIG, DEFAULT_USER_SETTINGS } from './default-settings';
 import { loadSetting, resetSettings, saveSetting } from './storage';
 
+export const SYNCHRONIZED_SETTING_CHANGED_EVENT = 'vp-synchronized-setting-changed';
+
+type SynchronizedSettingName =
+    | 'microphone'
+    | 'voiceCommands'
+    | 'navigationControls'
+    | 'fontSize'
+    | 'textAlignment'
+    | 'mirrorMode'
+    | 'rotateScreen'
+    | 'recordingDockOpacity'
+    | 'googleDocUrl';
+
+function emitSynchronizedSettingChanged(setting: SynchronizedSettingName, value: string | number): void {
+    window.dispatchEvent(new CustomEvent(SYNCHRONIZED_SETTING_CHANGED_EVENT, {
+        detail: { setting, value }
+    }));
+}
+
+function emitConfigSettingChange(property: string, value: unknown): void {
+    switch (property) {
+        case 'voiceCommandsEnabled':
+            emitSynchronizedSettingChanged('voiceCommands', value ? 'on' : 'off');
+            break;
+        case 'navigationControlsEnabled':
+            emitSynchronizedSettingChanged('navigationControls', value ? 'on' : 'off');
+            break;
+        case 'fontSize':
+            emitSynchronizedSettingChanged('fontSize', value as number);
+            break;
+        case 'textAlign':
+            emitSynchronizedSettingChanged('textAlignment', value as string);
+            break;
+        case 'dockOpacity':
+            emitSynchronizedSettingChanged('recordingDockOpacity', value as number);
+            break;
+    }
+}
+
+function emitStateSettingChange(property: string, value: unknown): void {
+    switch (property) {
+        case 'isListening':
+            emitSynchronizedSettingChanged('microphone', value ? 'on' : 'off');
+            break;
+        case 'isMirrored':
+            emitSynchronizedSettingChanged('mirrorMode', value ? 'on' : 'off');
+            break;
+        case 'isScreenRotated':
+            emitSynchronizedSettingChanged('rotateScreen', value ? 'on' : 'off');
+            break;
+        case 'googleDocUrl':
+            emitSynchronizedSettingChanged('googleDocUrl', typeof value === 'string' ? value : '');
+            break;
+    }
+}
+
 const restoredConfig = Object.fromEntries(
     Object.entries(DEFAULT_APP_CONFIG).map(([key, defaultValue]) => [key, loadSetting(key, defaultValue)])
 ) as unknown as AppConfig;
 
 const persistentConfig = new Proxy(restoredConfig, {
     set(target, property, value) {
+        const previous = Reflect.get(target, property);
         Reflect.set(target, property, value);
-        if (typeof property === 'string') saveSetting(property, value);
+        if (typeof property === 'string') {
+            saveSetting(property, value);
+            if (!Object.is(previous, value)) emitConfigSettingChange(property, value);
+        }
         return true;
     }
 });
@@ -33,8 +93,10 @@ const persistentStateKeys = new Set<keyof AppState>([
 
 export const state = new Proxy(initialState, {
     set(target, property, value) {
+        const previous = Reflect.get(target, property);
         Reflect.set(target, property, value);
         if (persistentStateKeys.has(property as keyof AppState)) saveSetting(String(property), value);
+        if (typeof property === 'string' && !Object.is(previous, value)) emitStateSettingChange(property, value);
         return true;
     }
 });
@@ -124,3 +186,7 @@ window.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+// Install the VPP synchronized-settings layer after this module has finished
+// creating the state proxies. Dynamic import avoids a state/handler init cycle.
+void import('./vpp-settings-sync');
