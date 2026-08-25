@@ -30,7 +30,7 @@ interface SynchronizedSettingChangedDetail {
 
 const internal = remoteCommandHandler as unknown as InternalRemoteCommandHandler;
 const installKey = '__voicePrompterVppSettingsSyncInstalled';
-const installState = window as typeof window & Record<string, unknown>;
+const installState = window as unknown as Record<string, unknown>;
 const GDOC_REMEMBER_KEY = 'voiceprompter_gdoc_remember';
 const GDOC_REMEMBER_DAYS = 7;
 
@@ -151,6 +151,13 @@ function wrapSimpleSettingMethod(
     });
 }
 
+function validateExtensionCall(message: JsonObject, method: string): string | null {
+    if (message.from !== 'bc') return 'application calls to vp must come from bc';
+    if (message.method !== method) return `call.method must be ${method}`;
+    if (!message.args || typeof message.args !== 'object' || Array.isArray(message.args)) return 'call.args must be a JSON object';
+    return null;
+}
+
 function install(): void {
     if (installState[installKey]) return;
     installState[installKey] = true;
@@ -158,18 +165,20 @@ function install(): void {
     const originalValidateCall = internal.validateCall.bind(remoteCommandHandler);
     internal.validateCall = (message: JsonObject): string | null => {
         if (message.method === 'getSettingsSnapshot') {
-            const args = message.args;
-            if (!args || typeof args !== 'object' || Array.isArray(args)) return 'getSettingsSnapshot.args must be an object';
-            if (Object.keys(args as JsonObject).length !== 0) return 'getSettingsSnapshot does not accept arguments';
+            const commonError = validateExtensionCall(message, 'getSettingsSnapshot');
+            if (commonError) return commonError;
+            if (message.expectsResponse !== true) return 'getSettingsSnapshot requires expectsResponse: true';
+            if (Object.keys(message.args as JsonObject).length !== 0) return 'getSettingsSnapshot does not accept arguments';
             return null;
         }
 
         if (message.method === 'setNavigationControls') {
-            const args = message.args;
-            if (!args || typeof args !== 'object' || Array.isArray(args)) return 'setNavigationControls.args must be an object';
-            const keys = Object.keys(args as JsonObject);
+            const commonError = validateExtensionCall(message, 'setNavigationControls');
+            if (commonError) return commonError;
+            const args = message.args as JsonObject;
+            const keys = Object.keys(args);
             if (keys.length !== 1 || keys[0] !== 'state') return 'setNavigationControls accepts exactly the state argument';
-            const requested = (args as JsonObject).state;
+            const requested = args.state;
             if (requested !== 'on' && requested !== 'off' && requested !== 'toggle') return 'setNavigationControls.state must be on, off or toggle';
             return null;
         }
