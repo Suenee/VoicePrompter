@@ -49,20 +49,38 @@ export function getHistory(): HistoryItem[] {
     return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
 }
 
+function getGoogleDocIdentity(url: string): string {
+    try {
+        const parsed = new URL(url);
+        const match = parsed.pathname.match(/^\/document\/d\/([^/]+)/);
+        return match?.[1] ?? url;
+    } catch {
+        return url;
+    }
+}
+
 export function saveToHistory(text: string, googleDocUrl?: string | null): void {
     let history = getHistory();
-    if (history.length > 0 && history[0].text === text) return;
+
+    if (googleDocUrl) {
+        const documentId = getGoogleDocIdentity(googleDocUrl);
+        history = history.filter(item =>
+            !item.googleDocUrl || getGoogleDocIdentity(item.googleDocUrl) !== documentId
+        );
+    } else {
+        history = history.filter(item => item.googleDocUrl || item.text !== text);
+    }
 
     const item: HistoryItem = {
         id: Date.now(),
-        text: text,
+        text,
         preview: text.substring(0, 40) + (text.length > 40 ? '...' : ''),
         date: new Date().toLocaleDateString(),
         ...(googleDocUrl ? { googleDocUrl } : {})
     };
 
     history.unshift(item);
-    if (history.length > 10) history.pop();
+    history = history.slice(0, 10);
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
 }
 
