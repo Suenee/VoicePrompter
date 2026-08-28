@@ -1,3 +1,5 @@
+import { removeGoogleDocFromHistory } from './storage';
+
 /**
  * Utility functions for Google Docs integration.
  */
@@ -14,6 +16,11 @@ export class GoogleDocFetchError extends Error {
 
 export function isPermanentGoogleDocError(error: unknown): boolean {
     return error instanceof GoogleDocFetchError && error.permanent;
+}
+
+function throwPermanentGoogleDocError(docUrl: string, error: GoogleDocFetchError): never {
+    removeGoogleDocFromHistory(docUrl);
+    throw error;
 }
 
 /**
@@ -55,7 +62,10 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout 
 export async function fetchGoogleDocText(docUrl: string): Promise<string> {
     const docId = extractDocId(docUrl);
     if (!docId) {
-        throw new GoogleDocFetchError('Invalid Google Doc URL. Please check the link and try again.', true);
+        throwPermanentGoogleDocError(
+            docUrl,
+            new GoogleDocFetchError('Invalid Google Doc URL. Please check the link and try again.', true)
+        );
     }
 
     const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt&cb=${Date.now()}`;
@@ -114,8 +124,10 @@ export async function fetchGoogleDocText(docUrl: string): Promise<string> {
         }
     }
 
-    if (permanentError) throw permanentError;
-    if (lastError instanceof GoogleDocFetchError && lastError.permanent) throw lastError;
+    if (permanentError) throwPermanentGoogleDocError(docUrl, permanentError);
+    if (lastError instanceof GoogleDocFetchError && lastError.permanent) {
+        throwPermanentGoogleDocError(docUrl, lastError);
+    }
 
     throw new GoogleDocFetchError('Failed to connect to Google Docs. Please verify your document is shared with "Anyone with the link" as a Viewer, or try again later.');
 }
