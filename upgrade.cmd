@@ -12,7 +12,8 @@ if /I "%VP_UPGRADE_INTERNAL%"=="1" if /I "%VP_UPGRADE_STAGE%"=="fresh" goto :fre
 cls
 set "VP_BOOT_REPO=%~dp0"
 if "%VP_BOOT_REPO:~-1%"=="\" set "VP_BOOT_REPO=%VP_BOOT_REPO:~0,-1%"
-set "VP_BOOT_LOG=%VP_BOOT_REPO%\upgrade.log"
+if not exist "%VP_BOOT_REPO%\logs" mkdir "%VP_BOOT_REPO%\logs" >nul 2>&1
+set "VP_BOOT_LOG=%VP_BOOT_REPO%\logs\upgrade.log"
 set "VP_FRESH_UPDATER=%TEMP%\VoicePrompter-upgrade-%RANDOM%-%RANDOM%.cmd"
 
 cd /d "%VP_BOOT_REPO%" || goto :bootstrap_repo_error
@@ -69,7 +70,9 @@ set "VP_REPO=%VP_UPGRADE_REPO%"
 if not defined VP_REPO exit /b 1
 cd /d "%VP_REPO%" || exit /b 1
 
-set "VP_LOG=%VP_REPO%\upgrade.log"
+if not exist "%VP_REPO%\logs" mkdir "%VP_REPO%\logs" >nul 2>&1
+if exist "%VP_REPO%\upgrade.log" move /Y "%VP_REPO%\upgrade.log" "%VP_REPO%\logs\upgrade-legacy.log" >nul 2>&1
+set "VP_LOG=%VP_REPO%\logs\upgrade.log"
 set "VP_DEV_WAS_RUNNING=0"
 set "VP_DEV_STARTED=0"
 set "VP_DEV_FLAG=%TEMP%\voiceprompter-upgrade-dev-%RANDOM%-%RANDOM%.flag"
@@ -148,7 +151,7 @@ call :info "Verifying VoicePrompter esbuild executable is not locked..."
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$p=Join-Path $env:VP_REPO 'node_modules\@esbuild\win32-x64\esbuild.exe'; if(-not (Test-Path -LiteralPath $p)){ exit 0 }; try { $s=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); $s.Close(); exit 0 } catch { Write-Error ('VoicePrompter esbuild.exe is still locked: '+$_.Exception.Message); $all=@(Get-CimInstance Win32_Process | Where-Object { $_.Name -ieq 'esbuild.exe' }); foreach($x in $all){ Write-Output ('  esbuild PID '+$x.ProcessId+' '+([string]$x.CommandLine)) }; exit 4 }" >>"%VP_LOG%" 2>&1
 if errorlevel 1 (
-    call :err "VoicePrompter esbuild.exe is still locked. No unrelated process was terminated; see upgrade.log."
+    call :err "VoicePrompter esbuild.exe is still locked. No unrelated process was terminated; see logs\upgrade.log."
     goto :error
 )
 
@@ -218,7 +221,6 @@ exit /b 0
 :is_internal_updater_file
 set "VP_CHECK_STATUS=%~1"
 set "VP_CHECK_PATH=%~2"
-if "%VP_CHECK_STATUS%"=="??" if /I "%VP_CHECK_PATH%"=="upgrade.log" exit /b 0
 if not "%VP_CHECK_STATUS%"==" M" exit /b 1
 if /I not "%VP_CHECK_PATH%"=="upgrade.cmd" exit /b 1
 set "VP_CURRENT_UPDATER_HASH="
@@ -263,7 +265,7 @@ exit /b 0
 :dirty_unsafe
 call :err "Local changes outside the safe generated-artifact whitelist were found."
 call :warn "No local files were modified by the updater."
-call :warn "Review upgrade.log and resolve the listed files before running upgrade.cmd again."
+call :warn "Review logs\upgrade.log and resolve the listed files before running upgrade.cmd again."
 exit /b 1
 
 :dirty_after_cleanup
@@ -310,7 +312,7 @@ if "%VP_DEV_WAS_RUNNING%"=="1" if "%VP_DEV_STARTED%"=="0" (
     call :warn "Upgrade failed. Restarting the previously running dev server..."
     start "VoicePrompter DEV" cmd /k "cd /d "%VP_REPO%" && npm run dev"
 )
-call :err "Upgrade FAILED. See upgrade.log for details."
+call :err "Upgrade FAILED. See logs\upgrade.log for details."
 exit /b 1
 
 :info
