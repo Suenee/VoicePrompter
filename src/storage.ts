@@ -59,6 +59,14 @@ function getGoogleDocIdentity(url: string): string {
     }
 }
 
+export function removeGoogleDocFromHistory(googleDocUrl: string): void {
+    const documentId = getGoogleDocIdentity(googleDocUrl);
+    const history = getHistory().filter(item =>
+        !item.googleDocUrl || getGoogleDocIdentity(item.googleDocUrl) !== documentId
+    );
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+}
+
 export function saveToHistory(text: string, googleDocUrl?: string | null): void {
     let history = getHistory();
 
