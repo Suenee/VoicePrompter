@@ -88,13 +88,23 @@ export async function fetchGoogleDocText(docUrl: string): Promise<string> {
             // Fetch with a 6-second timeout per proxy to keep the experience responsive
             const response = await fetchWithTimeout(proxyUrl, { cache: 'no-store' }, 6000);
             if (!response.ok) {
-                if (index === 0 && (response.status === 403 || response.status === 404)) {
+                const errorBody = index === 0 ? await response.text() : '';
+                const definitiveSourceFailure = index === 0 && (
+                    response.status === 404 ||
+                    (response.status === 403 && (
+                        errorBody.includes('Could not fetch document') ||
+                        errorBody.includes('Document is not public')
+                    ))
+                );
+
+                if (definitiveSourceFailure) {
                     permanentError = new GoogleDocFetchError(
                         'Document access denied or document not found. Please verify the Google Doc is shared with "Anyone with the link" as a Viewer.',
                         true
                     );
                     throw permanentError;
                 }
+
                 throw new GoogleDocFetchError(`Proxy returned status ${response.status}`);
             }
 
