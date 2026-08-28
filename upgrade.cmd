@@ -221,6 +221,7 @@ exit /b 0
 :is_internal_updater_file
 set "VP_CHECK_STATUS=%~1"
 set "VP_CHECK_PATH=%~2"
+if "%VP_CHECK_STATUS%"=="??" if /I "%VP_CHECK_PATH:~0,5%"=="logs/" if /I "%VP_CHECK_PATH:~-4%"==".log" exit /b 0
 if not "%VP_CHECK_STATUS%"==" M" exit /b 1
 if /I not "%VP_CHECK_PATH%"=="upgrade.cmd" exit /b 1
 set "VP_CURRENT_UPDATER_HASH="
