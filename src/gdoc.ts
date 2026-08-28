@@ -2,6 +2,20 @@
  * Utility functions for Google Docs integration.
  */
 
+export class GoogleDocFetchError extends Error {
+    permanent: boolean;
+
+    constructor(message: string, permanent = false) {
+        super(message);
+        this.name = 'GoogleDocFetchError';
+        this.permanent = permanent;
+    }
+}
+
+export function isPermanentGoogleDocError(error: unknown): boolean {
+    return error instanceof GoogleDocFetchError && error.permanent;
+}
+
 /**
  * Extracts the Google Document ID from a standard Google Doc URL.
  * Matches formats:
@@ -41,7 +55,7 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeout 
 export async function fetchGoogleDocText(docUrl: string): Promise<string> {
     const docId = extractDocId(docUrl);
     if (!docId) {
-        throw new Error('Invalid Google Doc URL. Please check the link and try again.');
+        throw new GoogleDocFetchError('Invalid Google Doc URL. Please check the link and try again.', true);
     }
 
     const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt&cb=${Date.now()}`;
@@ -55,42 +69,53 @@ export async function fetchGoogleDocText(docUrl: string): Promise<string> {
         `https://corsproxy.io/?${encodeURIComponent(exportUrl)}`
     ];
 
-    let lastError: any = null;
+    let lastError: unknown = null;
+    let permanentError: GoogleDocFetchError | null = null;
 
-    for (const proxyUrl of proxies) {
+    for (let index = 0; index < proxies.length; index++) {
+        const proxyUrl = proxies[index];
         try {
             // Fetch with a 6-second timeout per proxy to keep the experience responsive
             const response = await fetchWithTimeout(proxyUrl, { cache: 'no-store' }, 6000);
             if (!response.ok) {
-                throw new Error(`Proxy returned status ${response.status}`);
+                if (index === 0 && (response.status === 403 || response.status === 404)) {
+                    permanentError = new GoogleDocFetchError(
+                        'Document access denied or document not found. Please verify the Google Doc is shared with "Anyone with the link" as a Viewer.',
+                        true
+                    );
+                    throw permanentError;
+                }
+                throw new GoogleDocFetchError(`Proxy returned status ${response.status}`);
             }
-            
+
             const text = await response.text();
             if (!text || text.trim().length === 0) {
-                throw new Error('The retrieved document is empty.');
+                throw new GoogleDocFetchError('The retrieved document is empty.');
             }
 
             // Check if we received HTML (login page redirect)
             if (text.trim().startsWith('<!DOCTYPE html>') || text.includes('<html')) {
                 if (text.includes('google-signin') || text.includes('accounts.google.com') || text.includes('ServiceLogin')) {
-                    throw new Error('Document access denied. Please verify your Google Doc is shared with "Anyone with the link" as a Viewer.');
+                    permanentError = new GoogleDocFetchError(
+                        'Document access denied. Please verify your Google Doc is shared with "Anyone with the link" as a Viewer.',
+                        true
+                    );
+                    throw permanentError;
                 }
-                throw new Error('Failed to retrieve plain text. The page was redirected.');
+                throw new GoogleDocFetchError('Failed to retrieve plain text. The page was redirected.');
             }
 
             return text;
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.warn(`Failed to fetch via proxy ${proxyUrl}:`, error);
             lastError = error;
-            // Continue to the next proxy
+            // Continue to the next proxy. A fallback can still succeed even if
+            // the primary proxy reported a definitive source error.
         }
     }
 
-    // If all proxies failed, report the error details
-    const isPermissionError = lastError?.message && lastError.message.includes('access denied');
-    if (isPermissionError) {
-        throw lastError;
-    }
-    
-    throw new Error('Failed to connect to Google Docs. Please verify your document is shared with "Anyone with the link" as a Viewer, or try again later.');
+    if (permanentError) throw permanentError;
+    if (lastError instanceof GoogleDocFetchError && lastError.permanent) throw lastError;
+
+    throw new GoogleDocFetchError('Failed to connect to Google Docs. Please verify your document is shared with "Anyone with the link" as a Viewer, or try again later.');
 }
