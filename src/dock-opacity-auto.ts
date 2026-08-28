@@ -11,6 +11,7 @@ const SLIDER_FIXED_OFFSET = DOCK_OPACITY_MIN - 1;
 
 let cursorHidden = false;
 let controlInitialized = false;
+let dockObserverInstalled = false;
 
 function clampFixedOpacity(value: number): number {
     return Math.max(DOCK_OPACITY_MIN, Math.min(DOCK_OPACITY_MAX, Math.round(value)));
@@ -51,23 +52,42 @@ function updateControl(): void {
     if (label) label.textContent = value === DOCK_OPACITY_AUTO ? 'Auto' : `${value}%`;
 }
 
+function getAutoVisualOpacity(): string {
+    return String((cursorHidden ? AUTO_HIDDEN_OPACITY : AUTO_VISIBLE_OPACITY) / 100);
+}
+
 function applyVisualOpacity(): void {
     const dock = getDock();
     if (!dock) return;
 
     const value = normalizeRecordingDockOpacity(state.config.dockOpacity);
     if (value === DOCK_OPACITY_AUTO) {
-        dock.style.opacity = String((cursorHidden ? AUTO_HIDDEN_OPACITY : AUTO_VISIBLE_OPACITY) / 100);
+        const desired = getAutoVisualOpacity();
+        if (dock.style.opacity !== desired) dock.style.opacity = desired;
         return;
     }
 
     // Preserve the original meaning of the fixed setting: it applies while
     // the microphone/scrolling or recording state is active.
-    if (state.isListening || state.isRecording) {
-        dock.style.opacity = String(value / 100);
-    } else {
-        dock.style.opacity = '';
-    }
+    const desired = state.isListening || state.isRecording ? String(value / 100) : '';
+    if (dock.style.opacity !== desired) dock.style.opacity = desired;
+}
+
+function installDockObserver(): void {
+    if (dockObserverInstalled) return;
+    const dock = getDock();
+    if (!dock) return;
+    dockObserverInstalled = true;
+
+    // Existing VP code also writes the dock opacity when the microphone state
+    // changes. In Auto mode, immediately translate such writes back to the
+    // cursor-driven 100%/30% visual value without adding a second activity timer.
+    const observer = new MutationObserver(() => {
+        if (normalizeRecordingDockOpacity(state.config.dockOpacity) === DOCK_OPACITY_AUTO) {
+            applyVisualOpacity();
+        }
+    });
+    observer.observe(dock, { attributes: true, attributeFilter: ['style'] });
 }
 
 export function setRecordingDockOpacityValue(value: number): number {
@@ -118,6 +138,7 @@ function initializeControl(): void {
     const normalized = normalizeRecordingDockOpacity(state.config.dockOpacity);
     if (normalized !== state.config.dockOpacity) state.config.dockOpacity = normalized;
     updateControl();
+    installDockObserver();
     applyVisualOpacity();
 }
 
@@ -148,5 +169,6 @@ if (document.readyState === 'loading') {
 window.addEventListener('pageshow', () => {
     initializeControl();
     updateControl();
+    installDockObserver();
     applyVisualOpacity();
 });
