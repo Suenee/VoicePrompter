@@ -5,6 +5,9 @@ import { syncGoogleDocNow, setGoogleDocSourceUrl } from './google-doc-sync';
 type ToggleState = 'on' | 'off' | 'toggle';
 type Alignment = 'left' | 'center' | 'right';
 
+const DOCK_OPACITY_MIN = 30;
+const DOCK_OPACITY_MAX = 100;
+
 function targetBoolean(current: boolean, requested: ToggleState): boolean {
     if (requested === 'toggle') return !current;
     return requested === 'on';
@@ -19,6 +22,17 @@ function dispatchCheckbox(input: HTMLInputElement, checked: boolean): void {
     if (input.checked === checked) return;
     input.checked = checked;
     input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function clampDockOpacity(value: number): number {
+    return Math.max(DOCK_OPACITY_MIN, Math.min(DOCK_OPACITY_MAX, value));
+}
+
+function prepareDockOpacityInput(): void {
+    // The local slider historically used step=5. VPP adjust operations are
+    // percentage-point based, so allow values such as 99 instead of the range
+    // control silently snapping them back to 100.
+    els.dockOpacityInput.step = '1';
 }
 
 export function setMicrophoneState(requested: ToggleState): void {
@@ -61,11 +75,13 @@ export function setMirrorModeState(requested: ToggleState): void {
 }
 
 export function setRecordingDockOpacity(opacity: number): void {
-    dispatchInput(els.dockOpacityInput, opacity);
+    prepareDockOpacityInput();
+    dispatchInput(els.dockOpacityInput, clampDockOpacity(opacity));
 }
 
 export function adjustRecordingDockOpacity(delta: number): void {
-    const next = Math.max(30, Math.min(100, state.config.dockOpacity + delta));
+    prepareDockOpacityInput();
+    const next = clampDockOpacity(state.config.dockOpacity + delta);
     dispatchInput(els.dockOpacityInput, next);
 }
 
@@ -74,6 +90,18 @@ export async function syncGoogleDoc(): Promise<void> {
 }
 
 export async function setGoogleDocUrl(url: string): Promise<void> {
+    const previousUrl = state.googleDocUrl;
     setGoogleDocSourceUrl(url);
-    await syncGoogleDocNow();
+
+    try {
+        await syncGoogleDocNow();
+    } catch (error) {
+        // setGoogleDocUrl is atomic from the protocol point of view: a failed
+        // source must not replace the last known-good Google Doc setting.
+        setGoogleDocSourceUrl(previousUrl ?? '');
+        if (!previousUrl) {
+            document.getElementById('refreshGoogleDocContainer')?.classList.add('hidden');
+        }
+        throw error;
+    }
 }
