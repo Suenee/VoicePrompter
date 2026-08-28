@@ -1,3 +1,5 @@
+import { CURSOR_VISIBILITY_CHANGED_EVENT } from './dock-opacity-auto';
+
 const CURSOR_HIDE_DELAY_MS = 3000;
 
 let hideTimer: number | null = null;
@@ -42,11 +44,19 @@ function clearHideTimer(): void {
     }
 }
 
+function setCursorHidden(hidden: boolean): void {
+    if (cursorHidden === hidden) return;
+    cursorHidden = hidden;
+    window.dispatchEvent(new CustomEvent(CURSOR_VISIBILITY_CHANGED_EVENT, {
+        detail: { hidden }
+    }));
+}
+
 function showCursor(): void {
     clearHideTimer();
     const prompter = getPrompter();
     if (prompter && cursorHidden) prompter.style.cursor = '';
-    cursorHidden = false;
+    setCursorHidden(false);
 }
 
 function hideCursor(): void {
@@ -59,7 +69,7 @@ function hideCursor(): void {
     const prompter = getPrompter();
     if (!prompter) return;
     prompter.style.cursor = 'none';
-    cursorHidden = true;
+    setCursorHidden(true);
 }
 
 function armHideTimer(): void {
