@@ -1,5 +1,6 @@
 import { remoteCommandHandler } from './remote-command-handler';
 import { state, SYNCHRONIZED_SETTING_CHANGED_EVENT } from './state';
+import { getRecordingDockOpacitySetting } from './dock-opacity-auto';
 
 type JsonObject = Record<string, unknown>;
 type PublicHandler = (args: JsonObject) => Promise<JsonObject | void>;
@@ -49,7 +50,7 @@ function getSettingValue(setting: SynchronizedSettingName): SettingValue {
         case 'textAlignment': return state.config.textAlign;
         case 'mirrorMode': return onOff(state.isMirrored);
         case 'rotateScreen': return onOff(state.isScreenRotated);
-        case 'recordingDockOpacity': return state.config.dockOpacity;
+        case 'recordingDockOpacity': return getRecordingDockOpacitySetting();
         case 'googleDocUrl': return state.googleDocUrl ?? '';
     }
 }
