@@ -40,6 +40,22 @@ function copyDirectory(source: string, target: string): void {
     }
 }
 
+// Keep third-party analytics/session recording out of the Vite development
+// server. This keeps localhost/devel debugging clean while leaving production
+// builds and the author's deployed analytics unchanged.
+function disableTrackingInDevelopment() {
+    return {
+        name: 'disable-tracking-in-development',
+        apply: 'serve' as const,
+        transformIndexHtml(html: string) {
+            return html
+                .replace(/\s*<!-- Umami Analytics -->\s*<script\b[^>]*reactive-analytics\.up\.railway\.app\/script\.js[^>]*><\/script>/i, '')
+                .replace(/\s*<!-- Ansvisor AI-traffic tracking -->\s*<script\b[^>]*api\.ansvisor\.com\/t\.js[^>]*><\/script>/i, '')
+                .replace(/\s*<script\b[^>]*reactive-analytics\.up\.railway\.app\/recorder\.js[^>]*><\/script>/i, '')
+        }
+    }
+}
+
 // The marketing/site pages are already complete static HTML and contain large
 // inline style blocks. Re-processing them as Vite HTML entrypoints is both
 // unnecessary and can trigger html-proxy inline-CSS failures on Windows.
@@ -68,6 +84,7 @@ function copyStaticSite() {
 export default defineConfig({
     appType: 'mpa',
     plugins: [
+        disableTrackingInDevelopment(),
         VitePWA({
             registerType: 'autoUpdate',
             workbox: {
