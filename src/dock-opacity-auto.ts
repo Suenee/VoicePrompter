@@ -1,174 +1,167 @@
-import { state } from './state';
+import { state, SYNCHRONIZED_SETTING_CHANGED_EVENT } from './state';
 
-export const CURSOR_VISIBILITY_CHANGED_EVENT = 'vp-cursor-visibility-changed';
-
-const DOCK_OPACITY_AUTO = 0;
-const DOCK_OPACITY_MIN = 30;
-const DOCK_OPACITY_MAX = 100;
+const CURSOR_VISIBILITY_CHANGED_EVENT = 'vp-cursor-visibility-changed';
+const AUTO_SLIDER_VALUE = 29;
+const FIXED_MIN = 30;
+const FIXED_MAX = 100;
 const AUTO_HIDDEN_OPACITY = 30;
 const AUTO_VISIBLE_OPACITY = 100;
-const SLIDER_FIXED_OFFSET = DOCK_OPACITY_MIN - 1;
+const STORAGE_KEY = 'voiceprompter_dock_opacity_auto';
 
+let autoEnabled = localStorage.getItem(STORAGE_KEY) === 'true';
 let cursorHidden = false;
-let controlInitialized = false;
-let dockObserverInstalled = false;
+let initialized = false;
+let observerInstalled = false;
 
-function clampFixedOpacity(value: number): number {
-    return Math.max(DOCK_OPACITY_MIN, Math.min(DOCK_OPACITY_MAX, Math.round(value)));
-}
-
-export function normalizeRecordingDockOpacity(value: number): number {
-    if (!Number.isFinite(value)) return state.config.dockOpacity;
-    if (value < DOCK_OPACITY_MIN) return DOCK_OPACITY_AUTO;
-    return clampFixedOpacity(value);
-}
-
-function getDock(): HTMLElement | null {
-    return document.getElementById('mainControlsDock');
-}
-
-function getInput(): HTMLInputElement | null {
+function input(): HTMLInputElement | null {
     return document.getElementById('dockOpacityInput') as HTMLInputElement | null;
 }
 
-function getValueLabel(): HTMLElement | null {
+function label(): HTMLElement | null {
     return document.getElementById('dockOpacityVal');
 }
 
-function sliderValueFromSetting(value: number): number {
-    return value === DOCK_OPACITY_AUTO ? 0 : value - SLIDER_FIXED_OFFSET;
+function dock(): HTMLElement | null {
+    return document.getElementById('mainControlsDock');
 }
 
-function settingFromSliderValue(value: number): number {
-    return value <= 0 ? DOCK_OPACITY_AUTO : clampFixedOpacity(value + SLIDER_FIXED_OFFSET);
+function clampFixed(value: number): number {
+    return Math.max(FIXED_MIN, Math.min(FIXED_MAX, Math.round(value)));
+}
+
+function emitSettingChanged(): void {
+    window.dispatchEvent(new CustomEvent(SYNCHRONIZED_SETTING_CHANGED_EVENT, {
+        detail: { setting: 'recordingDockOpacity', value: getRecordingDockOpacitySetting() }
+    }));
 }
 
 function updateControl(): void {
-    const input = getInput();
-    const label = getValueLabel();
-    const value = normalizeRecordingDockOpacity(state.config.dockOpacity);
-
-    if (input) input.value = String(sliderValueFromSetting(value));
-    if (label) label.textContent = value === DOCK_OPACITY_AUTO ? 'Auto' : `${value}%`;
+    const control = input();
+    const valueLabel = label();
+    if (control) control.value = String(autoEnabled ? AUTO_SLIDER_VALUE : clampFixed(state.config.dockOpacity));
+    if (valueLabel) valueLabel.textContent = autoEnabled ? 'Auto' : `${clampFixed(state.config.dockOpacity)}%`;
 }
 
-function getAutoVisualOpacity(): string {
-    return String((cursorHidden ? AUTO_HIDDEN_OPACITY : AUTO_VISIBLE_OPACITY) / 100);
-}
+export function applyRecordingDockVisual(): void {
+    const element = dock();
+    if (!element) return;
 
-function applyVisualOpacity(): void {
-    const dock = getDock();
-    if (!dock) return;
-
-    const value = normalizeRecordingDockOpacity(state.config.dockOpacity);
-    if (value === DOCK_OPACITY_AUTO) {
-        const desired = getAutoVisualOpacity();
-        if (dock.style.opacity !== desired) dock.style.opacity = desired;
+    if (autoEnabled) {
+        element.style.opacity = String((cursorHidden ? AUTO_HIDDEN_OPACITY : AUTO_VISIBLE_OPACITY) / 100);
         return;
     }
 
-    // Preserve the original meaning of the fixed setting: it applies while
-    // the microphone/scrolling or recording state is active.
-    const desired = state.isListening || state.isRecording ? String(value / 100) : '';
-    if (dock.style.opacity !== desired) dock.style.opacity = desired;
+    element.style.opacity = state.isListening || state.isRecording
+        ? String(clampFixed(state.config.dockOpacity) / 100)
+        : '';
 }
 
-function installDockObserver(): void {
-    if (dockObserverInstalled) return;
-    const dock = getDock();
-    if (!dock) return;
-    dockObserverInstalled = true;
-
-    // Existing VP code also writes the dock opacity when the microphone state
-    // changes. In Auto mode, immediately translate such writes back to the
-    // cursor-driven 100%/30% visual value without adding a second activity timer.
-    const observer = new MutationObserver(() => {
-        if (normalizeRecordingDockOpacity(state.config.dockOpacity) === DOCK_OPACITY_AUTO) {
-            applyVisualOpacity();
-        }
-    });
-    observer.observe(dock, { attributes: true, attributeFilter: ['style'] });
+export function getRecordingDockOpacitySetting(): number {
+    return autoEnabled ? 0 : clampFixed(state.config.dockOpacity);
 }
 
-export function setRecordingDockOpacityValue(value: number): number {
-    const normalized = normalizeRecordingDockOpacity(value);
-    state.config.dockOpacity = normalized;
-    updateControl();
-    applyVisualOpacity();
-    return normalized;
-}
+export function setRecordingDockOpacitySetting(value: number): number {
+    const nextAuto = Number.isFinite(value) && value < FIXED_MIN;
+    const previousSetting = getRecordingDockOpacitySetting();
 
-export function adjustRecordingDockOpacityValue(delta: number): number {
-    const current = normalizeRecordingDockOpacity(state.config.dockOpacity);
-    let next: number;
-
-    if (current === DOCK_OPACITY_AUTO) {
-        next = delta > 0 ? normalizeRecordingDockOpacity(SLIDER_FIXED_OFFSET + delta) : DOCK_OPACITY_AUTO;
+    if (nextAuto) {
+        autoEnabled = true;
+        localStorage.setItem(STORAGE_KEY, 'true');
     } else {
-        next = normalizeRecordingDockOpacity(current + delta);
+        autoEnabled = false;
+        localStorage.removeItem(STORAGE_KEY);
+        const fixed = clampFixed(value);
+        if (state.config.dockOpacity !== fixed) state.config.dockOpacity = fixed;
     }
 
-    return setRecordingDockOpacityValue(next);
+    updateControl();
+    applyRecordingDockVisual();
+    if (previousSetting !== getRecordingDockOpacitySetting()) emitSettingChanged();
+    return getRecordingDockOpacitySetting();
 }
 
-function initializeControl(): void {
-    if (controlInitialized) return;
-    const input = getInput();
-    if (!input) return;
-    controlInitialized = true;
+export function adjustRecordingDockOpacitySetting(delta: number): number {
+    if (!Number.isFinite(delta) || delta === 0) return getRecordingDockOpacitySetting();
+    if (autoEnabled) {
+        if (delta <= 0) return 0;
+        return setRecordingDockOpacitySetting(FIXED_MIN + Math.round(delta) - 1);
+    }
+    return setRecordingDockOpacitySetting(state.config.dockOpacity + delta);
+}
 
-    // Slider positions are intentionally discrete: 0 = Auto, 1 = 30%,
-    // 2 = 31%, ... 71 = 100%. Thus Auto is exactly one step left of 30%.
-    input.min = '0';
-    input.max = String(DOCK_OPACITY_MAX - SLIDER_FIXED_OFFSET);
-    input.step = '1';
-    const tooltip = 'Auto: controls stay at 100% while the mouse is active and fade to 30% when the cursor automatically hides.';
-    input.title = tooltip;
-    input.closest('.mb-4')?.setAttribute('title', tooltip);
+function installObserver(): void {
+    if (observerInstalled) return;
+    const element = dock();
+    if (!element) return;
+    observerInstalled = true;
+    new MutationObserver(() => {
+        if (autoEnabled) applyRecordingDockVisual();
+    }).observe(element, { attributes: true, attributeFilter: ['style'] });
+}
 
-    input.addEventListener('input', event => {
-        // The original input handler assumes the slider value is the actual
-        // percentage. Auto mode uses a mapped slider scale, so this handler is
-        // authoritative and prevents the legacy handler from seeing raw values.
+function initialize(): void {
+    if (initialized) return;
+    const control = input();
+    if (!control) return;
+    initialized = true;
+
+    // Keep the original percentage scale intact. 29 is the one extra slider
+    // position immediately left of the original 30% minimum and means Auto.
+    control.min = String(AUTO_SLIDER_VALUE);
+    control.max = String(FIXED_MAX);
+    control.step = '1';
+    const tooltip = 'Auto: controls are 100% visible while the mouse is active and fade to 30% when the cursor hides.';
+    control.title = tooltip;
+    control.closest('.mb-4')?.setAttribute('title', tooltip);
+
+    // Only the special Auto position bypasses the original percentage handler.
+    // Every normal value 30..100 continues through the original VP handler.
+    control.addEventListener('input', event => {
+        if (Number.parseInt(control.value, 10) !== AUTO_SLIDER_VALUE) return;
         event.stopImmediatePropagation();
-        const raw = Number.parseInt(input.value, 10);
-        setRecordingDockOpacityValue(settingFromSliderValue(raw));
+        setRecordingDockOpacitySetting(0);
     }, { capture: true });
 
-    const normalized = normalizeRecordingDockOpacity(state.config.dockOpacity);
-    if (normalized !== state.config.dockOpacity) state.config.dockOpacity = normalized;
+    // For normal slider values the original handler remains authoritative;
+    // this listener only records that Auto has been left and refreshes visuals.
+    control.addEventListener('input', () => {
+        const value = Number.parseInt(control.value, 10);
+        if (value < FIXED_MIN) return;
+        const wasAuto = autoEnabled;
+        autoEnabled = false;
+        localStorage.removeItem(STORAGE_KEY);
+        if (wasAuto) emitSettingChanged();
+        updateControl();
+        applyRecordingDockVisual();
+    });
+
     updateControl();
-    installDockObserver();
-    applyVisualOpacity();
+    installObserver();
+    applyRecordingDockVisual();
 }
 
 window.addEventListener(CURSOR_VISIBILITY_CHANGED_EVENT, event => {
     const detail = (event as CustomEvent<{ hidden: boolean }>).detail;
     if (!detail) return;
     cursorHidden = detail.hidden;
-    if (normalizeRecordingDockOpacity(state.config.dockOpacity) === DOCK_OPACITY_AUTO) {
-        applyVisualOpacity();
-    }
+    if (autoEnabled) applyRecordingDockVisual();
 });
 
-window.addEventListener('vp-synchronized-setting-changed', event => {
+window.addEventListener(SYNCHRONIZED_SETTING_CHANGED_EVENT, event => {
     const detail = (event as CustomEvent<{ setting?: string }>).detail;
-    if (!detail) return;
-    if (detail.setting === 'microphone' || detail.setting === 'recordingDockOpacity') {
-        updateControl();
-        applyVisualOpacity();
-    }
+    if (!detail || detail.setting !== 'microphone') return;
+    applyRecordingDockVisual();
 });
 
 if (document.readyState === 'loading') {
-    window.addEventListener('DOMContentLoaded', () => window.setTimeout(initializeControl, 0), { once: true });
+    window.addEventListener('DOMContentLoaded', () => window.setTimeout(initialize, 0), { once: true });
 } else {
-    window.setTimeout(initializeControl, 0);
+    window.setTimeout(initialize, 0);
 }
 
 window.addEventListener('pageshow', () => {
-    initializeControl();
+    initialize();
     updateControl();
-    installDockObserver();
-    applyVisualOpacity();
+    installObserver();
+    applyRecordingDockVisual();
 });
