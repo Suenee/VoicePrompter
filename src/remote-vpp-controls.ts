@@ -2,8 +2,8 @@ import { els } from './elements';
 import { state } from './state';
 import { syncGoogleDocNow, setGoogleDocSourceUrl } from './google-doc-sync';
 import {
-    adjustRecordingDockOpacityValue,
-    setRecordingDockOpacityValue
+    adjustRecordingDockOpacitySetting,
+    setRecordingDockOpacitySetting
 } from './dock-opacity-auto';
 
 type ToggleState = 'on' | 'off' | 'toggle';
@@ -65,11 +65,11 @@ export function setMirrorModeState(requested: ToggleState): void {
 }
 
 export function setRecordingDockOpacity(opacity: number): void {
-    setRecordingDockOpacityValue(opacity);
+    setRecordingDockOpacitySetting(opacity);
 }
 
 export function adjustRecordingDockOpacity(delta: number): void {
-    adjustRecordingDockOpacityValue(delta);
+    adjustRecordingDockOpacitySetting(delta);
 }
 
 export async function syncGoogleDoc(): Promise<void> {
