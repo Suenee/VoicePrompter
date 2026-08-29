@@ -105,6 +105,15 @@ function initialize(): void {
     if (!control) return;
     initialized = true;
 
+    // Migrate the previous broken implementation, which persisted Auto as 0
+    // in the ordinary percentage setting. Keep Auto, but restore a valid fixed
+    // percentage underneath so legacy VP code can never make the dock invisible.
+    if (!Number.isFinite(state.config.dockOpacity) || state.config.dockOpacity < FIXED_MIN) {
+        autoEnabled = true;
+        localStorage.setItem(STORAGE_KEY, 'true');
+        state.config.dockOpacity = FIXED_MIN;
+    }
+
     // Keep the original percentage scale intact. 29 is the one extra slider
     // position immediately left of the original 30% minimum and means Auto.
     control.min = String(AUTO_SLIDER_VALUE);
