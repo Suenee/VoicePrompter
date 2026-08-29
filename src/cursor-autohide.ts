@@ -1,6 +1,5 @@
-import { CURSOR_VISIBILITY_CHANGED_EVENT } from './dock-opacity-auto';
-
 const CURSOR_HIDE_DELAY_MS = 3000;
+const CURSOR_VISIBILITY_CHANGED_EVENT = 'vp-cursor-visibility-changed';
 
 let hideTimer: number | null = null;
 let cursorHidden = false;
