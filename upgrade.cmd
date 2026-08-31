@@ -6,8 +6,9 @@ rem NORMAL ENTRY / BOOTSTRAP
 rem The repository copy never replaces itself while it is running.
 rem A fresh upgrade.cmd from origin/devel is extracted to TEMP, normalized to
 rem CRLF, and the real upgrade runs synchronously from that TEMP copy.
-rem Bootstrap is safe for mapped drives and UNC paths and can install missing
-rem Git before the self-update step.
+rem Bootstrap is safe for mapped drives and UNC paths, can install missing Git,
+rem and can turn an otherwise empty folder containing upgrade.cmd into a full
+rem VoicePrompter devel working tree.
 rem ---------------------------------------------------------------------------
 if /I "%VP_UPGRADE_INTERNAL%"=="1" if /I "%VP_UPGRADE_STAGE%"=="fresh" goto :fresh_entry
 
@@ -18,6 +19,8 @@ set "VP_FRESH_UPDATER=%TEMP%\VoicePrompter-upgrade-%RANDOM%-%RANDOM%.cmd"
 set "VP_BOOT_PUSHED=0"
 set "VP_BOOT_REPO="
 set "VP_BOOT_LOG="
+set "VP_BOOT_NEW_REPO=0"
+set "VP_REPOSITORY_URL=https://github.com/Suenee/VoicePrompter.git"
 
 where powershell.exe >nul 2>&1 || goto :bootstrap_powershell_error
 
@@ -31,7 +34,13 @@ set "VP_BOOT_LOG=%VP_BOOT_REPO%\logs\upgrade.log"
 call :ensure_git_bootstrap
 if errorlevel 1 goto :bootstrap_git_error
 
-git -c safe.directory=* rev-parse --is-inside-work-tree >nul 2>&1 || goto :bootstrap_repo_error
+git -c safe.directory=* rev-parse --is-inside-work-tree >nul 2>&1
+if errorlevel 1 (
+    call :bootstrap_new_repository
+    if errorlevel 1 goto :bootstrap_repo_error
+    set "VP_BOOT_NEW_REPO=1"
+)
+
 git -c safe.directory=* fetch origin devel >nul 2>&1 || goto :bootstrap_fetch_error
 
 git -c safe.directory=* show origin/devel:upgrade.cmd >"%VP_FRESH_UPDATER%" 2>nul || goto :bootstrap_extract_error
@@ -45,6 +54,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$p=$env:VP_FRESH_UPDATER
 set "VP_UPGRADE_INTERNAL=1"
 set "VP_UPGRADE_STAGE=fresh"
 set "VP_UPGRADE_REPO=%VP_BOOT_SOURCE%"
+set "VP_UPGRADE_NEW_REPO=%VP_BOOT_NEW_REPO%"
 
 if "%VP_BOOT_PUSHED%"=="1" popd
 set "VP_BOOT_PUSHED=0"
@@ -54,8 +64,20 @@ set "VP_BOOT_RC=%ERRORLEVEL%"
 del /q "%VP_FRESH_UPDATER%" >nul 2>&1
 endlocal & exit /b %VP_BOOT_RC%
 
+:bootstrap_new_repository
+rem Never initialize over an arbitrary populated directory. A fresh bootstrap
+rem directory may contain only this updater and its logs directory.
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$bad=@(Get-ChildItem -LiteralPath $env:VP_BOOT_REPO -Force | Where-Object { $_.Name -ine 'upgrade.cmd' -and $_.Name -ine 'logs' }); if($bad.Count -gt 0){ Write-Output ('Refusing fresh bootstrap because the folder contains: '+(($bad | ForEach-Object Name) -join ', ')); exit 2 }; exit 0" >>"%VP_BOOT_LOG%" 2>&1
+if errorlevel 1 exit /b 1
+
+git init >nul 2>&1 || exit /b 1
+git remote remove origin >nul 2>&1
+git remote add origin "%VP_REPOSITORY_URL%" >nul 2>&1 || exit /b 1
+exit /b 0
+
 :bootstrap_repo_error
-set "VP_BOOT_ERROR=VoicePrompter repository could not be opened or is not a Git working tree."
+set "VP_BOOT_ERROR=VoicePrompter repository could not be opened. For a fresh install, the folder must contain only upgrade.cmd (and optional logs)."
 goto :bootstrap_fail
 
 :bootstrap_git_error
@@ -97,6 +119,18 @@ pushd "%VP_REPO_SOURCE%" >nul 2>&1 || exit /b 1
 set "VP_REPO=%CD%"
 set "VP_REPO_PUSHED=1"
 
+rem On a brand-new PC the bootstrap has only initialized .git and fetched devel.
+rem The updater itself is already running safely from TEMP, so it is now safe to
+rem replace the downloaded bootstrap copy with the complete repository contents.
+if /I "%VP_UPGRADE_NEW_REPO%"=="1" (
+    git -c safe.directory=* checkout -f -B devel origin/devel >nul 2>&1
+    if errorlevel 1 (
+        popd
+        powershell -NoProfile -Command "Write-Host 'ERROR: Could not materialize VoicePrompter devel in the fresh folder.' -ForegroundColor Red"
+        exit /b 1
+    )
+)
+
 if not exist "%VP_REPO%\logs" mkdir "%VP_REPO%\logs" >nul 2>&1
 if exist "%VP_REPO%\upgrade.log" move /Y "%VP_REPO%\upgrade.log" "%VP_REPO%\logs\upgrade-legacy.log" >nul 2>&1
 set "VP_LOG=%VP_REPO%\logs\upgrade.log"
@@ -129,6 +163,7 @@ call :info "Running current updater from a CRLF-normalized temporary copy."
 call :info "Repository source: %VP_REPO_SOURCE%"
 call :info "Active working path: %VP_REPO%"
 call :info "npm cache: %npm_config_cache%"
+if /I "%VP_UPGRADE_NEW_REPO%"=="1" call :info "Fresh repository bootstrap completed from origin/devel."
 
 call :main
 set "VP_EXIT_CODE=%ERRORLEVEL%"
