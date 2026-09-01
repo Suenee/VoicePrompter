@@ -34,7 +34,39 @@ if (globalThis.crypto && typeof globalThis.crypto.randomUUID !== 'function') {
             value: fallbackUuidV4
         });
     } catch {
-        // Some browser implementations may expose Crypto as non-extensible.
         // Callers that import createUuid() still have a safe fallback.
+    }
+}
+
+// Chromium can hide navigator.mediaDevices completely on plain HTTP when the
+// page is opened through a LAN IP. The original VP code expects the object to
+// exist during module initialization, so provide a non-capturing compatibility
+// object instead of letting the whole application crash. Actual camera/mic
+// access still fails explicitly until the page is served from a secure context.
+if (!navigator.mediaDevices) {
+    const events = new EventTarget();
+    const unavailable = () => Promise.reject(
+        new DOMException(
+            'Camera and microphone access requires HTTPS or localhost.',
+            'NotAllowedError'
+        )
+    );
+
+    const mediaDevicesFallback = {
+        enumerateDevices: async (): Promise<MediaDeviceInfo[]> => [],
+        getUserMedia: unavailable,
+        getSupportedConstraints: (): MediaTrackSupportedConstraints => ({}),
+        addEventListener: events.addEventListener.bind(events),
+        removeEventListener: events.removeEventListener.bind(events),
+        dispatchEvent: events.dispatchEvent.bind(events)
+    } as unknown as MediaDevices;
+
+    try {
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: mediaDevicesFallback
+        });
+    } catch {
+        // If the browser refuses the shim, guarded callers still remain safe.
     }
 }
