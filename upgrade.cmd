@@ -252,7 +252,7 @@ call npx vite build >>"%VP_LOG%" 2>&1 || goto :error
 if "%VP_DEV_WAS_RUNNING%"=="1" if "%VP_DEV_STARTED%"=="0" (
     set "VP_DEV_STARTED=1"
     call :info "Starting dev server in a separate terminal..."
-    start "VoicePrompter DEV" cmd /k "pushd "%VP_REPO_SOURCE%" && set "npm_config_cache=%npm_config_cache%" && npm run dev"
+    start "VoicePrompter DEV" cmd /k "pushd "%VP_REPO_SOURCE%" && set "npm_config_cache=%npm_config_cache%" && call run.cmd"
     timeout /t 2 /nobreak >nul
     powershell -NoProfile -Command "if(Get-NetTCPConnection -LocalPort 5173 -State Listen -ErrorAction SilentlyContinue){exit 0}else{exit 1}" >>"%VP_LOG%" 2>&1
     if errorlevel 1 (
@@ -276,7 +276,7 @@ for /f "delims=" %%L in ('git -c safe.directory^=* status --porcelain --untracke
 if "%VP_HAS_UNSAFE_DIRTY%"=="1" goto :dirty_unsafe
 if not "%VP_HAS_SAFE_DIRTY%"=="1" goto :working_tree_safe
 
-call :warn "Only known generated web artifacts are modified. Restoring them safely..."
+call :warn "Only known generated or managed artifacts are modified. Restoring them safely..."
 for /f "delims=" %%L in ('git -c safe.directory^=* status --porcelain --untracked-files^=all 2^>nul') do call :restore_safe_dirty "%%L"
 set "VP_HAS_SAFE_DIRTY=0"
 set "VP_HAS_UNSAFE_DIRTY=0"
@@ -325,6 +325,8 @@ set "VP_CHECK_STATUS=%~1"
 set "VP_CHECK_PATH=%~2"
 if not "%VP_CHECK_STATUS%"==" M" exit /b 1
 if /I "%VP_CHECK_PATH%"=="changelog.html" exit /b 0
+if /I "%VP_CHECK_PATH%"=="public/sitemap.xml" exit /b 0
+if /I "%VP_CHECK_PATH%"=="run.cmd" exit /b 0
 if /I "%VP_CHECK_PATH:~0,5%"=="blog/" if /I "%VP_CHECK_PATH:~-5%"==".html" exit /b 0
 if /I "%VP_CHECK_PATH:~0,4%"=="mac/" if /I "%VP_CHECK_PATH:~-10%"=="index.html" exit /b 0
 exit /b 1
@@ -500,7 +502,7 @@ if exist "%VP_DEV_FLAG%" del /q "%VP_DEV_FLAG%" >nul 2>&1
 if "%VP_DEV_WAS_RUNNING%"=="1" if "%VP_DEV_STARTED%"=="0" (
     set "VP_DEV_STARTED=1"
     call :warn "Upgrade failed. Restarting the previously running dev server..."
-    start "VoicePrompter DEV" cmd /k "pushd "%VP_REPO_SOURCE%" && set "npm_config_cache=%npm_config_cache%" && npm run dev"
+    start "VoicePrompter DEV" cmd /k "pushd "%VP_REPO_SOURCE%" && set "npm_config_cache=%npm_config_cache%" && call run.cmd"
 )
 call :err "Upgrade FAILED. See logs\upgrade.log for details."
 exit /b 1
