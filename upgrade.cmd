@@ -427,50 +427,69 @@ exit /b 0
 
 :ensure_node_runtime
 set "VP_NODE_OK=0"
+set "VP_NODE_VERSION="
 set "VP_NODE_MAJOR="
 where node.exe >nul 2>&1
-if not errorlevel 1 (
-    for /f "delims=" %%V in ('node -p "parseInt(process.versions.node.split('.')[0],10)" 2^>nul') do set "VP_NODE_MAJOR=%%V"
-    if defined VP_NODE_MAJOR if !VP_NODE_MAJOR! GEQ 20 (
-        where npm.cmd >nul 2>&1
-        if not errorlevel 1 set "VP_NODE_OK=1"
-    )
-)
-if "%VP_NODE_OK%"=="1" exit /b 0
+if errorlevel 1 goto :node_install_required
 
+for /f "delims=" %%V in ('node --version 2^>nul') do set "VP_NODE_VERSION=%%V"
+if not defined VP_NODE_VERSION goto :node_install_required
+set "VP_NODE_VERSION=%VP_NODE_VERSION:v=%"
+for /f "tokens=1 delims=." %%V in ("%VP_NODE_VERSION%") do set "VP_NODE_MAJOR=%%V"
+if not defined VP_NODE_MAJOR goto :node_install_required
+set /a VP_NODE_MAJOR_NUM=%VP_NODE_MAJOR% >nul 2>&1
+if errorlevel 1 goto :node_install_required
+if %VP_NODE_MAJOR_NUM% LSS 20 goto :node_install_required
+where npm.cmd >nul 2>&1
+if errorlevel 1 goto :node_install_required
+set "VP_NODE_OK=1"
+exit /b 0
+
+:node_install_required
 call :warn "Node.js 20+ with npm was not found. Attempting Node.js LTS installation via winget..."
 where winget.exe >nul 2>&1
-if errorlevel 1 (
-    call :err "Node.js 20+ is required and winget is unavailable for automatic installation."
-    exit /b 1
-)
+if errorlevel 1 goto :node_winget_missing
 
 winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements --silent >>"%VP_LOG%" 2>&1
-if errorlevel 1 (
-    call :err "Automatic Node.js LTS installation failed."
-    exit /b 1
-)
+if errorlevel 1 goto :node_install_failed
 
 call :refresh_path
 if exist "%ProgramFiles%\nodejs\node.exe" set "PATH=%ProgramFiles%\nodejs;%PATH%"
 
+set "VP_NODE_VERSION="
 set "VP_NODE_MAJOR="
-for /f "delims=" %%V in ('node -p "parseInt(process.versions.node.split('.')[0],10)" 2^>nul') do set "VP_NODE_MAJOR=%%V"
-if not defined VP_NODE_MAJOR (
-    call :err "Node.js was installed but is not available in this process. Run upgrade.cmd again."
-    exit /b 1
-)
-if !VP_NODE_MAJOR! LSS 20 (
-    call :err "Installed Node.js is older than version 20."
-    exit /b 1
-)
+for /f "delims=" %%V in ('node --version 2^>nul') do set "VP_NODE_VERSION=%%V"
+if not defined VP_NODE_VERSION goto :node_installed_not_available
+set "VP_NODE_VERSION=%VP_NODE_VERSION:v=%"
+for /f "tokens=1 delims=." %%V in ("%VP_NODE_VERSION%") do set "VP_NODE_MAJOR=%%V"
+if not defined VP_NODE_MAJOR goto :node_installed_not_available
+set /a VP_NODE_MAJOR_NUM=%VP_NODE_MAJOR% >nul 2>&1
+if errorlevel 1 goto :node_installed_not_available
+if %VP_NODE_MAJOR_NUM% LSS 20 goto :node_too_old
 where npm.cmd >nul 2>&1
-if errorlevel 1 (
-    call :err "npm was not found after Node.js installation."
-    exit /b 1
-)
+if errorlevel 1 goto :npm_missing_after_install
 call :info "Node.js LTS and npm are available."
 exit /b 0
+
+:node_winget_missing
+call :err "Node.js 20+ is required and winget is unavailable for automatic installation."
+exit /b 1
+
+:node_install_failed
+call :err "Automatic Node.js LTS installation failed."
+exit /b 1
+
+:node_installed_not_available
+call :err "Node.js was installed but is not available in this process. Run upgrade.cmd again."
+exit /b 1
+
+:node_too_old
+call :err "Installed Node.js is older than version 20."
+exit /b 1
+
+:npm_missing_after_install
+call :err "npm was not found after Node.js installation."
+exit /b 1
 
 :refresh_path
 for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')" 2^>nul`) do set "PATH=%%P"
