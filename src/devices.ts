@@ -1,6 +1,34 @@
 import { state } from './state';
 import { els } from './elements';
 
+class UnavailableMediaDevices extends EventTarget {
+    async enumerateDevices(): Promise<MediaDeviceInfo[]> {
+        return [];
+    }
+
+    async getUserMedia(): Promise<MediaStream> {
+        throw new DOMException(
+            'Camera and microphone access requires HTTPS or localhost.',
+            'NotAllowedError'
+        );
+    }
+}
+
+// Browsers may omit navigator.mediaDevices entirely on an insecure LAN origin
+// (for example http://192.168.x.x). Keep the rest of VoicePrompter usable in
+// that environment instead of failing during startup when listeners are wired.
+if (!navigator.mediaDevices) {
+    try {
+        Object.defineProperty(navigator, 'mediaDevices', {
+            configurable: true,
+            value: new UnavailableMediaDevices()
+        });
+    } catch {
+        // If the browser does not allow defining the property, callers still
+        // retain their normal error handling for unavailable media features.
+    }
+}
+
 /**
  * Enumerates all connected media devices (cameras and microphones) and populates
  * the respective select elements in the settings panel.
