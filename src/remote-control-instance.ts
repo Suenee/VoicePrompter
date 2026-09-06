@@ -119,7 +119,7 @@ class CoordinatedWebSocket extends NativeWebSocket {
     private negotiationRequestId: string | null = null;
     private suppressApplicationClose = false;
     constructor(url: string | URL, protocols?: string | string[]) {
-        if (protocols === undefined) super(url); else super(url, protocols);
+        super(url, protocols ?? []);
         if (!isVpBridgeSocket(url)) return;
         takenOver = false; removeNotices(); channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage); managedSocket = this;
         this.addEventListener('open', () => this.registerConnection());
