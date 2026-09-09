@@ -13,8 +13,22 @@ let managedSocket: CoordinatedWebSocket | null = null;
 let takenOver = false;
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL_NAME) : null;
 
+function normalizeVpBridgeUrl(url: string | URL): string | URL {
+    try {
+        const parsed = new URL(String(url), window.location.href);
+        if (parsed.pathname === '/vp') parsed.pathname = '/mailbox/vp';
+        return parsed.toString();
+    } catch {
+        return url;
+    }
+}
 function isVpBridgeSocket(url: string | URL): boolean {
-    try { return new URL(String(url), window.location.href).pathname === '/vp'; } catch { return false; }
+    try {
+        const pathname = new URL(String(url), window.location.href).pathname;
+        return pathname === '/vp' || pathname === '/mailbox/vp';
+    } catch {
+        return false;
+    }
 }
 function updateStatusBarControlAvailability(): void {
     const connected = managedSocket?.readyState === NativeWebSocket.OPEN && managedSocket.isAdmitted();
@@ -119,8 +133,9 @@ class CoordinatedWebSocket extends NativeWebSocket {
     private negotiationRequestId: string | null = null;
     private suppressApplicationClose = false;
     constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols ?? []);
-        if (!isVpBridgeSocket(url)) return;
+        const bridgeUrl = normalizeVpBridgeUrl(url);
+        super(bridgeUrl, protocols ?? []);
+        if (!isVpBridgeSocket(bridgeUrl)) return;
         takenOver = false; removeNotices(); channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage); managedSocket = this;
         this.addEventListener('open', () => this.registerConnection());
         this.addEventListener('message', event => this.inspectServerMessage(event.data));
@@ -172,5 +187,9 @@ class CoordinatedWebSocket extends NativeWebSocket {
 }
 
 window.WebSocket = CoordinatedWebSocket as typeof WebSocket;
-window.addEventListener('DOMContentLoaded', updateStatusBarControlAvailability);
+window.addEventListener('DOMContentLoaded', () => {
+    updateStatusBarControlAvailability();
+    const apiKeyInput = document.getElementById('remoteControlApiKeyInput') as HTMLInputElement | null;
+    if (apiKeyInput) apiKeyInput.type = 'text';
+});
 export function isRemoteControlTakenOver(): boolean { return takenOver; }
