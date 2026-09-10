@@ -1,0 +1,448 @@
+{
+  "manifestVersion": 1,
+  "id": "voiceprompter",
+  "name": "VoicePrompter",
+  "version": "1.1.0",
+  "description": "VoicePrompter control and synchronization profile for Socket Universe Module.",
+  "vppVersion": 1,
+  "namespace": "vp",
+  "sourceApp": "VoicePrompterModule",
+  "peerLabel": "VoicePrompter",
+  "configFields": [
+    {
+      "type": "number",
+      "id": "maxStatusBarZones",
+      "label": "Maximum Status Bar zones",
+      "width": 6,
+      "default": 6,
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "required": true,
+      "tooltip": "Practical SUM UI limit and the default active zone count after module/Companion start. VPP itself has no maximum zone count."
+    },
+    {
+      "type": "number",
+      "id": "markerArgVariables",
+      "label": "Marker argument variables",
+      "width": 6,
+      "default": 1,
+      "min": 0,
+      "max": 5,
+      "step": 1,
+      "required": true,
+      "tooltip": "Registers marker_arg0 through marker_argN-1 as direct Companion variables. Range 0-5."
+    }
+  ],
+  "variables": [
+    { "id": "connected", "name": "SUB connected (1/0)", "role": "serverConnected" },
+    { "id": "vp_connected", "name": "VoicePrompter mailbox connected (1/0)", "role": "peerConnected" },
+    { "id": "connection_state", "name": "Connection state", "role": "connectionState" },
+    { "id": "diagnostic_level", "name": "Diagnostic level (green/yellow/red/gray)", "role": "diagnosticLevel" },
+    { "id": "diagnostic_status", "name": "Diagnostic overall status", "role": "diagnosticStatus" },
+    { "id": "diagnostic_vpbridge", "name": "Diagnostic SUB status", "role": "diagnosticServer" },
+    { "id": "diagnostic_voiceprompter", "name": "Diagnostic VoicePrompter status", "role": "diagnosticPeer" },
+    { "id": "diagnostic_reason", "name": "Diagnostic reason", "role": "diagnosticReason" },
+    { "id": "heartbeat_interval_ms", "name": "Heartbeat interval ms", "role": "heartbeatInterval" },
+    { "id": "protocol_version", "name": "Protocol version", "role": "protocolVersion" },
+    { "id": "id", "name": "Message ID", "role": "messageId" },
+    { "id": "correlation_id", "name": "Correlation ID", "role": "correlationId" },
+    { "id": "type", "name": "Message type", "role": "messageType" },
+    { "id": "from", "name": "From mailbox", "role": "from" },
+    { "id": "recipient", "name": "Recipient mailbox", "role": "recipient" },
+    { "id": "method", "name": "Call method", "role": "method" },
+    { "id": "event", "name": "Event name", "role": "event" },
+    { "id": "command", "name": "Marker command", "role": "markerCommand" },
+    { "id": "marker_args", "name": "Marker arguments JSON", "role": "markerArgs" },
+    { "id": "arg_offset", "name": "Call args.offset", "role": "argOffset" },
+    { "id": "data", "name": "Data JSON", "role": "data" },
+    { "id": "result", "name": "Result JSON", "role": "result" },
+    { "id": "error_code", "name": "Error code", "role": "errorCode" },
+    { "id": "error_message", "name": "Error message", "role": "errorMessage" },
+    { "id": "error_details", "name": "Error details JSON", "role": "errorDetails" },
+    { "id": "source_app", "name": "Source application", "role": "sourceApp" },
+    { "id": "source_version", "name": "Source application version", "role": "sourceVersion" },
+    { "id": "source_instance", "name": "Source instance", "role": "sourceInstance" },
+    { "id": "timestamp", "name": "Protocol timestamp", "role": "timestamp" },
+    { "id": "payload", "name": "Complete JSON payload", "role": "payload" },
+    { "id": "last_received", "name": "Local receive timestamp", "role": "lastReceived" },
+    { "id": "last_sent", "name": "Local send timestamp", "role": "lastSent" },
+    { "id": "protocol_error", "name": "Last VPP validation error", "role": "protocolError" },
+    { "id": "word", "name": "Current VoicePrompter word", "initial": "" },
+    { "id": "status_bar_mode", "name": "Status Bar remembered mode (off/top/bottom)", "initial": "" },
+    { "id": "status_bar_enabled", "name": "Status Bar remembered enabled state (1/0)", "initial": "" },
+    { "id": "status_bar_zone_count", "name": "Status Bar remembered active zone count", "initial": "" },
+    { "id": "status_bar_max_zones", "name": "Status Bar configured maximum zones", "initialFromConfig": "maxStatusBarZones" },
+    { "id": "status_bar_snapshot", "name": "Status Bar runtime memory JSON", "initial": "{}" },
+    { "id": "microphone", "name": "Microphone state (on/off)", "initial": "" },
+    { "id": "voice_commands", "name": "Voice Commands state (on/off)", "initial": "" },
+    { "id": "navigation_controls", "name": "Navigation Controls state (on/off)", "initial": "" },
+    { "id": "font_size", "name": "Font size (px)", "initial": "" },
+    { "id": "text_alignment", "name": "Text alignment (left/center/right)", "initial": "" },
+    { "id": "mirror_mode", "name": "Mirror Mode state (on/off)", "initial": "" },
+    { "id": "rotate_screen", "name": "Rotate Screen state (on/off)", "initial": "" },
+    { "id": "recording_dock_opacity", "name": "Recording Dock opacity (%)", "initial": "" },
+    { "id": "google_doc_url", "name": "Current Google Docs URL", "initial": "" }
+  ],
+  "dynamicVariables": [
+    {
+      "idTemplate": "marker_arg{index}",
+      "nameTemplate": "Marker argument {index}",
+      "countFromConfig": "markerArgVariables"
+    }
+  ],
+  "settings": {
+    "snapshotMethod": "getSettingsSnapshot",
+    "changedEvent": "settingChanged",
+    "values": {
+      "microphone": { "variableId": "microphone", "type": "enum", "values": ["on", "off"] },
+      "voiceCommands": { "variableId": "voice_commands", "type": "enum", "values": ["on", "off"] },
+      "navigationControls": { "variableId": "navigation_controls", "type": "enum", "values": ["on", "off"] },
+      "fontSize": { "variableId": "font_size", "type": "integer", "min": 20, "max": 100 },
+      "textAlignment": { "variableId": "text_alignment", "type": "enum", "values": ["left", "center", "right"] },
+      "mirrorMode": { "variableId": "mirror_mode", "type": "enum", "values": ["on", "off"] },
+      "rotateScreen": { "variableId": "rotate_screen", "type": "enum", "values": ["on", "off"] },
+      "recordingDockOpacity": { "variableId": "recording_dock_opacity", "type": "integer", "min": 30, "max": 100 },
+      "googleDocUrl": { "variableId": "google_doc_url", "type": "string" }
+    }
+  },
+  "memory": {
+    "statusBar": {
+      "lifetime": "runtime",
+      "fields": {
+        "mode": { "type": "enum", "values": ["off", "top", "bottom"], "initial": null },
+        "activeZoneCount": { "type": "integer", "initialFromConfig": "maxStatusBarZones" },
+        "zones": { "type": "map", "initial": {} }
+      },
+      "publish": [
+        { "variableId": "status_bar_mode", "path": "mode", "nullValue": "" },
+        { "variableId": "status_bar_enabled", "derive": "enabledFromMode", "path": "mode", "offValue": "off", "nullValue": "" },
+        { "variableId": "status_bar_zone_count", "path": "activeZoneCount", "nullValue": "" },
+        { "variableId": "status_bar_max_zones", "config": "maxStatusBarZones" },
+        { "variableId": "status_bar_snapshot", "derive": "jsonRoot" }
+      ]
+    }
+  },
+  "events": {
+    "marker": {
+      "operation": "marker",
+      "expectsResponse": "optional",
+      "commandVariableId": "command",
+      "argsVariableId": "marker_args",
+      "directArgPrefix": "marker_arg",
+      "directArgCountConfig": "markerArgVariables"
+    },
+    "wordChanged": {
+      "operation": "mapArgsToVariables",
+      "expectsResponse": false,
+      "args": { "word": { "type": "string" } },
+      "map": { "word": "word" }
+    },
+    "settingChanged": {
+      "operation": "settingChanged",
+      "expectsResponse": false
+    },
+    "statusBarModeChanged": {
+      "operation": "memoryUpdateAndReplay",
+      "expectsResponse": false,
+      "args": { "mode": { "type": "enum", "values": ["off", "top", "bottom"] } },
+      "memoryPath": "statusBar.mode",
+      "fromArg": "mode",
+      "replay": "statusBarZones",
+      "replayUnless": { "arg": "mode", "equals": "off" }
+    },
+    "statusBarSyncRequest": {
+      "operation": "memorySyncRequest",
+      "expectsResponse": true,
+      "args": { "mode": { "type": "enum", "values": ["off", "top", "bottom"] } },
+      "bootstrap": { "memoryPath": "statusBar.mode", "fromArg": "mode", "onlyIfNull": true },
+      "availability": {
+        "modePath": "statusBar.mode",
+        "validModes": ["off", "top", "bottom"],
+        "visibleModes": ["top", "bottom"],
+        "countPath": "statusBar.activeZoneCount"
+      },
+      "replay": "statusBarFull"
+    }
+  },
+  "replays": {
+    "statusBarZones": [
+      {
+        "type": "call",
+        "method": "setStatusBarZoneCount",
+        "args": { "count": { "memoryPath": "statusBar.activeZoneCount" } },
+        "expectsResponse": false,
+        "queue": { "policy": "replace", "key": "statusBar.zoneCount" }
+      },
+      {
+        "type": "repeatMapCall",
+        "mapPath": "statusBar.zones",
+        "limitPath": "statusBar.activeZoneCount",
+        "method": "setStatusBarZone",
+        "args": {
+          "index": { "mapKeyInteger": true },
+          "text": { "recordPath": "text" },
+          "align": { "recordPath": "align" }
+        },
+        "expectsResponse": false,
+        "queue": { "policy": "replace", "keyTemplate": "statusBar.zone.{index}" }
+      }
+    ],
+    "statusBarFull": [
+      {
+        "type": "call",
+        "method": "setStatusBarMode",
+        "args": { "mode": { "memoryPath": "statusBar.mode" } },
+        "expectsResponse": false,
+        "queue": { "policy": "replace", "key": "statusBar.mode" }
+      },
+      {
+        "type": "replayRef",
+        "replay": "statusBarZones",
+        "when": { "memoryPath": "statusBar.mode", "in": ["top", "bottom"] }
+      }
+    ]
+  },
+  "actions": {
+    "navigation": {
+      "name": "Navigation: Control",
+      "operation": "methodChoiceCall",
+      "expectsResponse": true,
+      "queue": { "policy": "fifo" },
+      "methodOption": "instruction",
+      "methods": {
+        "GO_START": { "method": "goStart" },
+        "MARKER_BACK": { "method": "markerBack", "args": ["offset"] },
+        "GO_BACK": { "method": "goBack", "args": ["offset"] },
+        "GO_CURRENT": { "method": "goCurrent", "args": ["offset"] },
+        "GO_NEXT": { "method": "goNext", "args": ["offset"] },
+        "MARKER_NEXT": { "method": "markerNext", "args": ["offset"] },
+        "GO_FINISH": { "method": "goFinish" }
+      },
+      "options": [
+        {
+          "type": "dropdown",
+          "id": "instruction",
+          "label": "Instruction",
+          "default": "GO_NEXT",
+          "choices": [
+            { "id": "GO_START", "label": "Go Start" },
+            { "id": "MARKER_BACK", "label": "Marker Back" },
+            { "id": "GO_BACK", "label": "Go Back" },
+            { "id": "GO_CURRENT", "label": "Go Current" },
+            { "id": "GO_NEXT", "label": "Go Next" },
+            { "id": "MARKER_NEXT", "label": "Marker Next" },
+            { "id": "GO_FINISH", "label": "Go Finish" }
+          ]
+        },
+        { "type": "textinput", "id": "offset", "label": "Offset", "default": "1", "useVariables": true, "multiline": true, "arg": "offset", "parse": "integer", "visibleForMethodArg": "offset" }
+      ]
+    },
+    "search_marker": {
+      "name": "Navigation: Search Marker",
+      "operation": "call",
+      "method": "searchMarker",
+      "expectsResponse": true,
+      "queue": { "policy": "fifo" },
+      "options": [
+        { "type": "textinput", "id": "search", "label": "Search", "default": "", "useVariables": true, "multiline": false, "arg": "search", "parse": "string" },
+        { "type": "dropdown", "id": "from", "label": "From", "default": "cursorForward", "arg": "from", "parse": "enum", "values": ["cursorForward", "cursorBackward", "start", "end"], "choices": [{"id":"cursorForward","label":"Cursor Forward"},{"id":"cursorBackward","label":"Cursor Backward"},{"id":"start","label":"Start"},{"id":"end","label":"End"}] },
+        { "type": "dropdown", "id": "match", "label": "Match", "default": "substring", "arg": "match", "parse": "enum", "values": ["substring", "exact"], "choices": [{"id":"substring","label":"Substring"},{"id":"exact","label":"Exact"}] },
+        { "type": "dropdown", "id": "caseSensitive", "label": "Case Sensitive", "default": "no", "arg": "caseSensitive", "parse": "enum", "values": ["no", "yes"], "choices": [{"id":"no","label":"No"},{"id":"yes","label":"Yes"}] }
+      ]
+    },
+    "navigation_controls": {
+      "name": "Navigation: Controls",
+      "operation": "call",
+      "method": "setNavigationControls",
+      "expectsResponse": true,
+      "queueByOption": { "option": "state", "fifoValues": ["toggle"], "replaceKey": "navigationControls" },
+      "options": [
+        { "type": "dropdown", "id": "state", "label": "State", "default": "toggle", "arg": "state", "parse": "enum", "values": ["on", "off", "toggle"], "choices": [{"id":"on","label":"On"},{"id":"off","label":"Off"},{"id":"toggle","label":"Toggle"}] }
+      ]
+    },
+    "microphone": {
+      "name": "Audio: Microphone",
+      "operation": "call",
+      "method": "setMicrophone",
+      "expectsResponse": true,
+      "queueByOption": { "option": "state", "fifoValues": ["toggle"], "replaceKey": "microphone" },
+      "options": [
+        { "type": "dropdown", "id": "state", "label": "State", "default": "toggle", "arg": "state", "parse": "enum", "values": ["on", "off", "toggle"], "choices": [{"id":"on","label":"On"},{"id":"off","label":"Off"},{"id":"toggle","label":"Toggle"}] }
+      ]
+    },
+    "font_size": {
+      "name": "Reading: Font Size",
+      "operation": "call",
+      "method": "setFontSize",
+      "expectsResponse": true,
+      "queue": { "policy": "replace", "key": "fontSize" },
+      "options": [
+        { "type": "textinput", "id": "size", "label": "Font size (px)", "default": "50", "useVariables": true, "multiline": false, "arg": "size", "parse": "integer", "min": 20, "max": 100, "invalid": "ignore", "tooltip": "Must resolve to a whole number from 20 to 100 px." }
+      ]
+    },
+    "font_size_adjust": {
+      "name": "Reading: Font Size Adjust",
+      "operation": "call",
+      "method": "adjustFontSize",
+      "expectsResponse": true,
+      "queue": { "policy": "fifo" },
+      "options": [
+        { "type": "textinput", "id": "delta", "label": "Adjustment (px)", "default": "0", "useVariables": true, "multiline": false, "arg": "delta", "parse": "integer", "invalid": "ignore", "tooltip": "Relative whole-number change to the current font size. VoicePrompter clamps the final font size to 20–100 px." }
+      ]
+    },
+    "alignment": {
+      "name": "Reading: Text Alignment",
+      "operation": "call",
+      "method": "setAlignment",
+      "expectsResponse": true,
+      "queue": { "policy": "replace", "key": "textAlignment" },
+      "options": [
+        { "type": "dropdown", "id": "align", "label": "Text Alignment", "default": "left", "arg": "align", "parse": "enum", "values": ["left", "center", "right"], "choices": [{"id":"left","label":"Left"},{"id":"center","label":"Center"},{"id":"right","label":"Right"}] }
+      ]
+    },
+    "mirror_mode": {
+      "name": "Display: Mirror Mode",
+      "operation": "call",
+      "method": "setMirrorMode",
+      "expectsResponse": true,
+      "queueByOption": { "option": "state", "fifoValues": ["toggle"], "replaceKey": "mirrorMode" },
+      "options": [
+        { "type": "dropdown", "id": "state", "label": "State", "default": "toggle", "arg": "state", "parse": "enum", "values": ["on", "off", "toggle"], "choices": [{"id":"on","label":"On"},{"id":"off","label":"Off"},{"id":"toggle","label":"Toggle"}] }
+      ]
+    },
+    "recording_dock_opacity": {
+      "name": "Display: Recording Dock Opacity",
+      "operation": "call",
+      "method": "setRecordingDockOpacity",
+      "expectsResponse": true,
+      "queue": { "policy": "replace", "key": "recordingDockOpacity" },
+      "options": [
+        { "type": "textinput", "id": "opacity", "label": "Opacity (%)", "default": "65", "useVariables": true, "multiline": false, "arg": "opacity", "parse": "integer", "min": 30, "max": 100, "invalid": "ignore", "tooltip": "Must resolve to a whole number from 30 to 100." }
+      ]
+    },
+    "recording_dock_opacity_adjust": {
+      "name": "Display: Recording Dock Opacity Adjust",
+      "operation": "call",
+      "method": "adjustRecordingDockOpacity",
+      "expectsResponse": true,
+      "queue": { "policy": "fifo" },
+      "options": [
+        { "type": "textinput", "id": "delta", "label": "Adjustment (%)", "default": "0", "useVariables": true, "multiline": false, "arg": "delta", "parse": "integer", "invalid": "ignore", "tooltip": "Relative whole-number change. VoicePrompter clamps the final opacity to 30–100%." }
+      ]
+    },
+    "voice_commands": {
+      "name": "Audio: Voice Commands",
+      "operation": "call",
+      "method": "setVoiceCommands",
+      "expectsResponse": true,
+      "queueByOption": { "option": "state", "fifoValues": ["toggle"], "replaceKey": "voiceCommands" },
+      "options": [
+        { "type": "dropdown", "id": "state", "label": "State", "default": "toggle", "arg": "state", "parse": "enum", "values": ["on", "off", "toggle"], "choices": [{"id":"on","label":"On"},{"id":"off","label":"Off"},{"id":"toggle","label":"Toggle"}] }
+      ]
+    },
+    "rotate_screen": {
+      "name": "Display: Rotate Screen",
+      "operation": "call",
+      "method": "setRotateScreen",
+      "expectsResponse": true,
+      "queueByOption": { "option": "state", "fifoValues": ["toggle"], "replaceKey": "rotateScreen" },
+      "options": [
+        { "type": "dropdown", "id": "state", "label": "State", "default": "toggle", "arg": "state", "parse": "enum", "values": ["on", "off", "toggle"], "choices": [{"id":"on","label":"On"},{"id":"off","label":"Off"},{"id":"toggle","label":"Toggle"}] }
+      ]
+    },
+    "sync_google_doc": {
+      "name": "Document: Synchronize Google Doc",
+      "operation": "call",
+      "method": "syncGoogleDoc",
+      "expectsResponse": true,
+      "queue": { "policy": "fifo" },
+      "options": []
+    },
+    "set_google_doc_url": {
+      "name": "Document: Set Google Doc URL",
+      "operation": "call",
+      "method": "setGoogleDocUrl",
+      "expectsResponse": true,
+      "queue": { "policy": "replace", "key": "googleDocUrl" },
+      "options": [
+        { "type": "textinput", "id": "url", "label": "Google Doc URL", "default": "", "useVariables": true, "multiline": false, "arg": "url", "parse": "googleDocUrl", "tooltip": "HTTPS Google Docs document URL. Companion variables/expressions are supported." }
+      ]
+    },
+    "status_bar_mode": {
+      "name": "Status Bar: Mode",
+      "operation": "memoryScalarCall",
+      "method": "setStatusBarMode",
+      "expectsResponse": false,
+      "delivery": "peer",
+      "queue": { "policy": "replace", "key": "statusBar.mode" },
+      "memoryPath": "statusBar.mode",
+      "valueOption": "mode",
+      "options": [
+        { "type": "dropdown", "id": "mode", "label": "Mode", "default": "bottom", "arg": "mode", "parse": "enum", "values": ["off", "top", "bottom"], "choices": [{"id":"off","label":"Off"},{"id":"top","label":"Top"},{"id":"bottom","label":"Bottom"}] }
+      ]
+    },
+    "status_bar_zone_count": {
+      "name": "Status Bar: Set Zone Count",
+      "operation": "memoryCountCall",
+      "method": "setStatusBarZoneCount",
+      "expectsResponse": false,
+      "delivery": "peer",
+      "queue": { "policy": "replace", "key": "statusBar.zoneCount" },
+      "memoryPath": "statusBar.activeZoneCount",
+      "valueOption": "count",
+      "maxFromConfig": "maxStatusBarZones",
+      "indexedMemoryPath": "statusBar.zones",
+      "indexedReplayMethod": "setStatusBarZone",
+      "indexedReplayQueueKeyTemplate": "statusBar.zone.{index}",
+      "options": [
+        { "type": "textinput", "id": "count", "label": "Number of active zones", "default": "2", "useVariables": true, "multiline": false, "arg": "count", "parse": "integer", "min": 1, "invalid": "ignore", "tooltip": "Must resolve to an integer from 1 through the configured Maximum Status Bar zones." }
+      ]
+    },
+    "status_bar_zone": {
+      "name": "Status Bar: Set Zone",
+      "operation": "memoryIndexedCall",
+      "method": "setStatusBarZone",
+      "expectsResponse": false,
+      "delivery": "peer",
+      "indexOption": "index",
+      "mapPath": "statusBar.zones",
+      "maxFromConfig": "maxStatusBarZones",
+      "record": { "text": "text", "align": "align" },
+      "queue": { "policy": "replace", "keyTemplate": "statusBar.zone.{index}" },
+      "options": [
+        { "type": "textinput", "id": "index", "label": "Zone number", "default": "1", "useVariables": true, "multiline": false, "arg": "index", "parse": "integer", "min": 1, "invalid": "ignore", "tooltip": "Must resolve to an integer from 1 through the configured Maximum Status Bar zones." },
+        { "type": "textinput", "id": "text", "label": "Content", "default": "", "useVariables": true, "multiline": false, "arg": "text", "parse": "string", "maxUnicode": 1024 },
+        { "type": "dropdown", "id": "align", "label": "Alignment", "default": "left", "arg": "align", "parse": "enum", "values": ["left", "center", "right"], "choices": [{"id":"left","label":"Left"},{"id":"center","label":"Center"},{"id":"right","label":"Right"}] }
+      ]
+    },
+    "clear_status_bar": {
+      "name": "Status Bar: Clear",
+      "operation": "memoryClearCall",
+      "method": "clearStatusBar",
+      "expectsResponse": false,
+      "delivery": "peer",
+      "queue": { "policy": "fifo" },
+      "memoryPath": "statusBar.zones",
+      "options": []
+    },
+    "json": {
+      "name": "Advanced: JSON",
+      "description": "Temporary raw WebSocket test action.",
+      "operation": "raw",
+      "options": [
+        { "type": "textinput", "id": "payload", "label": "JSON / Text", "default": "", "useVariables": true, "multiline": true }
+      ]
+    }
+  },
+  "presets": [
+    { "id": "navigation_go_start", "type": "navigation", "name": "Go Start", "text": "|<\nGo Start", "instruction": "GO_START" },
+    { "id": "navigation_marker_back", "type": "navigation", "name": "Marker Back", "text": "[<\nMarker Back", "instruction": "MARKER_BACK", "offset": "1" },
+    { "id": "navigation_go_back", "type": "navigation", "name": "Go Back", "text": "<<\nGo Back", "instruction": "GO_BACK", "offset": "1" },
+    { "id": "navigation_go_current", "type": "navigation", "name": "Go Current", "text": "<|\nGo Current", "instruction": "GO_CURRENT", "offset": "1" },
+    { "id": "navigation_go_next", "type": "navigation", "name": "Go Next", "text": ">>\nGo Next", "instruction": "GO_NEXT", "offset": "1" },
+    { "id": "navigation_marker_next", "type": "navigation", "name": "Marker Next", "text": ">]\nMarker Next", "instruction": "MARKER_NEXT", "offset": "1" },
+    { "id": "navigation_go_finish", "type": "navigation", "name": "Go Finish", "text": ">|\nGo Finish", "instruction": "GO_FINISH" },
+    { "id": "connection_diagnostics", "type": "diagnostics", "name": "Connection Diagnostics" }
+  ]
+}
