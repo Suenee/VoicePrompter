@@ -18,7 +18,6 @@ interface MarkerRange {
     text: string;
 }
 
-const internal = remoteCommandHandler as unknown as InternalRemoteCommandHandler;
 const installKey = '__voicePrompterSearchMarkerInstalled';
 const installState = window as unknown as Record<string, unknown>;
 
@@ -73,8 +72,8 @@ function markerMatches(marker: MarkerRange, search: string, match: MatchMode, ca
     let searchText = normalizeMarkerText(search);
 
     if (!caseSensitive) {
-        markerText = markerText.toLocaleLowerCase();
-        searchText = searchText.toLocaleLowerCase();
+        markerText = markerText.toLowerCase();
+        searchText = searchText.toLowerCase();
     }
 
     return match === 'exact'
@@ -196,8 +195,9 @@ function validateSearchMarkerCall(message: JsonObject): string | null {
 
 function install(): void {
     if (installState[installKey]) return;
-    installState[installKey] = true;
 
+    const internal = remoteCommandHandler as unknown as InternalRemoteCommandHandler;
+    installState[installKey] = true;
     internal.publicMethods.searchMarker = searchMarker;
 
     const originalValidateCall = internal.validateCall.bind(remoteCommandHandler);
@@ -207,4 +207,7 @@ function install(): void {
     };
 }
 
-install();
+// remote-event-hooks is part of a pre-existing module cycle through
+// remote-command-handler/google-doc-sync. Delay registration until the current
+// module graph has finished evaluating so remoteCommandHandler is initialized.
+window.setTimeout(install, 0);
