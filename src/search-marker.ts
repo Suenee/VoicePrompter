@@ -5,6 +5,7 @@ type JsonObject = Record<string, unknown>;
 type PublicHandler = (args: JsonObject) => Promise<JsonObject | void>;
 type SearchFrom = 'cursorForward' | 'cursorBackward' | 'start' | 'end';
 type MatchMode = 'substring' | 'exact';
+type CaseSensitiveMode = boolean | 'no' | 'yes';
 
 interface InternalRemoteCommandHandler {
     publicMethods: Record<string, PublicHandler>;
@@ -98,13 +99,17 @@ async function applyMarker(marker: MarkerRange): Promise<void> {
     scrollToCurrent();
 }
 
+function resolveCaseSensitive(value: CaseSensitiveMode | undefined): boolean {
+    return value === true || value === 'yes';
+}
+
 async function searchMarker(args: JsonObject): Promise<void> {
     if (state.scriptWords.length === 0) return;
 
     const search = String(args.search ?? '');
     const from = (args.from ?? 'cursorForward') as SearchFrom;
     const match = (args.match ?? 'substring') as MatchMode;
-    const caseSensitive = (args.caseSensitive ?? false) as boolean;
+    const caseSensitive = resolveCaseSensitive(args.caseSensitive as CaseSensitiveMode | undefined);
     const markers = getMarkers();
     const active = currentMarker(markers);
     const matches = (marker: MarkerRange): boolean =>
@@ -186,8 +191,14 @@ function validateSearchMarkerCall(message: JsonObject): string | null {
         return 'searchMarker.match must be substring or exact';
     }
 
-    if (args.caseSensitive !== undefined && typeof args.caseSensitive !== 'boolean') {
-        return 'searchMarker.caseSensitive must be boolean';
+    if (
+        args.caseSensitive !== undefined &&
+        args.caseSensitive !== true &&
+        args.caseSensitive !== false &&
+        args.caseSensitive !== 'no' &&
+        args.caseSensitive !== 'yes'
+    ) {
+        return 'searchMarker.caseSensitive must be no, yes or boolean';
     }
 
     return null;
