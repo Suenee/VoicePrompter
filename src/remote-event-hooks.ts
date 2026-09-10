@@ -1,4 +1,5 @@
 import { remoteCommandHandler } from './remote-command-handler';
+import './search-marker';
 import { state } from './state';
 
 type MarkerArg = number | string;
