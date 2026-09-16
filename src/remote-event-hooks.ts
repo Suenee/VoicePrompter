@@ -123,6 +123,10 @@ export class RemoteEventHooks {
         return { command, args: parsedArgs };
     }
 
+    private isQuote(ch: string): boolean {
+        return ch === '"' || ch === '“' || ch === '”';
+    }
+
     private findFirstArgument(body: string): { index: number } | null {
         let inQuote = false;
         let escaped = false;
@@ -133,11 +137,11 @@ export class RemoteEventHooks {
             if (inQuote) {
                 if (escaped) escaped = false;
                 else if (ch === '\\') escaped = true;
-                else if (ch === '"') inQuote = false;
+                else if (this.isQuote(ch)) inQuote = false;
                 continue;
             }
 
-            if (ch === '"') {
+            if (this.isQuote(ch)) {
                 if (i === 0 || /\s/.test(body[i - 1])) return { index: i };
                 inQuote = true;
                 continue;
@@ -172,7 +176,7 @@ export class RemoteEventHooks {
                 continue;
             }
 
-            if (input[i] === '"') {
+            if (this.isQuote(input[i])) {
                 const quoted = this.readQuotedArgument(input, i);
                 if (!quoted) return null;
                 args.push(quoted.value);
@@ -207,7 +211,7 @@ export class RemoteEventHooks {
                 escaped = false;
             } else if (ch === '\\') {
                 escaped = true;
-            } else if (ch === '"') {
+            } else if (this.isQuote(ch)) {
                 return { value, nextIndex: i + 1 };
             } else {
                 value += ch;
