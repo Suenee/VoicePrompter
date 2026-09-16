@@ -1,9 +1,11 @@
-import { loadSetting } from './storage';
+import { loadSetting, saveSetting } from './storage';
 import { createUuid } from './browser-compat';
 
 const CHANNEL_NAME = 'voiceprompter-remote-control-owner';
 const TAKEOVER_NOTICE_ID = 'remoteControlTakeoverNotice';
 const NEGOTIATION_NOTICE_ID = 'remoteControlNegotiationNotice';
+const SOCKET_BOX_SETTING = 'remoteControlSocketBox';
+const DEFAULT_SOCKET_BOX = 'vp';
 const windowId = createUuid();
 const NativeWebSocket = window.WebSocket;
 type JsonObject = Record<string, unknown>;
@@ -13,10 +15,16 @@ let managedSocket: CoordinatedWebSocket | null = null;
 let takenOver = false;
 const channel = 'BroadcastChannel' in window ? new BroadcastChannel(CHANNEL_NAME) : null;
 
+function getSocketBox(): string {
+    const value = String(loadSetting(SOCKET_BOX_SETTING, DEFAULT_SOCKET_BOX) ?? '').trim();
+    return value || DEFAULT_SOCKET_BOX;
+}
 function normalizeVpBridgeUrl(url: string | URL): string | URL {
     try {
         const parsed = new URL(String(url), window.location.href);
-        if (parsed.pathname === '/vp') parsed.pathname = '/mailbox/vp';
+        if (parsed.pathname === '/vp' || parsed.pathname === '/mailbox/vp') {
+            parsed.pathname = `/mailbox/${encodeURIComponent(getSocketBox())}`;
+        }
         return parsed.toString();
     } catch {
         return url;
@@ -25,9 +33,31 @@ function normalizeVpBridgeUrl(url: string | URL): string | URL {
 function isVpBridgeSocket(url: string | URL): boolean {
     try {
         const pathname = new URL(String(url), window.location.href).pathname;
-        return pathname === '/vp' || pathname === '/mailbox/vp';
+        return pathname === '/vp' || /^\/mailbox\/[^/]+$/.test(pathname);
     } catch {
         return false;
+    }
+}
+function transportMessage(data: string): string {
+    const socketBox = getSocketBox();
+    if (socketBox === DEFAULT_SOCKET_BOX) return data;
+    try {
+        const message = JSON.parse(data) as JsonObject;
+        if (message.from === DEFAULT_SOCKET_BOX) message.from = socketBox;
+        return JSON.stringify(message);
+    } catch {
+        return data;
+    }
+}
+function applicationMessage(data: unknown): unknown {
+    const socketBox = getSocketBox();
+    if (socketBox === DEFAULT_SOCKET_BOX || typeof data !== 'string') return data;
+    try {
+        const message = JSON.parse(data) as JsonObject;
+        if (message.recipient === socketBox) message.recipient = DEFAULT_SOCKET_BOX;
+        return JSON.stringify(message);
+    } catch {
+        return data;
     }
 }
 function updateStatusBarControlAvailability(): void {
@@ -116,7 +146,7 @@ function relinquishRemoteControl(): void {
     updateStatusBarControlAvailability(); showTakeoverNotice(); playTakeoverBeep();
 }
 function createDisconnectingEvent(): JsonObject {
-    return { protocolVersion: 1, id: createUuid(), type: 'event', from: 'vp', recipient: 'bc', event: 'disconnecting', args: { reason: 'user' }, expectsResponse: false, source: { app: 'VoicePrompter', version: 'devel' }, timestamp: new Date().toISOString() };
+    return { protocolVersion: 1, id: createUuid(), type: 'event', from: getSocketBox(), recipient: 'bc', event: 'disconnecting', args: { reason: 'user' }, expectsResponse: false, source: { app: 'VoicePrompter', version: 'devel' }, timestamp: new Date().toISOString() };
 }
 function shouldAnnounceUserDisconnect(socket: WebSocket): boolean {
     return socket === managedSocket && !takenOver && socket.readyState === NativeWebSocket.OPEN && loadSetting('remoteControlEnabled', false) === false;
@@ -132,18 +162,33 @@ class CoordinatedWebSocket extends NativeWebSocket {
     private registerId: string | null = null;
     private negotiationRequestId: string | null = null;
     private suppressApplicationClose = false;
+    private applicationMessageHandler: ((this: WebSocket, ev: MessageEvent) => unknown) | null = null;
     constructor(url: string | URL, protocols?: string | string[]) {
         const bridgeUrl = normalizeVpBridgeUrl(url);
         super(bridgeUrl, protocols ?? []);
         if (!isVpBridgeSocket(bridgeUrl)) return;
         takenOver = false; removeNotices(); channel?.postMessage({ type: 'takeover', ownerId: windowId } satisfies TakeoverMessage); managedSocket = this;
         this.addEventListener('open', () => this.registerConnection());
-        this.addEventListener('message', event => this.inspectServerMessage(event.data));
+        this.addEventListener('message', event => {
+            this.inspectServerMessage(event.data);
+            if (this.applicationMessageHandler) {
+                const adapted = new MessageEvent(event.type, {
+                    data: applicationMessage(event.data),
+                    origin: event.origin,
+                    lastEventId: event.lastEventId,
+                    source: event.source,
+                    ports: [...event.ports]
+                });
+                this.applicationMessageHandler.call(this, adapted);
+            }
+        });
         this.addEventListener('close', () => { if (managedSocket === this) managedSocket = null; updateStatusBarControlAvailability(); if (this.suppressApplicationClose) window.setTimeout(() => showTakeoverNotice(), 0); });
     }
+    override get onmessage(): ((this: WebSocket, ev: MessageEvent) => unknown) | null { return this.applicationMessageHandler; }
+    override set onmessage(handler: ((this: WebSocket, ev: MessageEvent) => unknown) | null) { this.applicationMessageHandler = handler; }
     isAdmitted(): boolean { return this.admitted; }
     private serverCall(method: string, args: JsonObject): string {
-        const id = createUuid(); super.send(JSON.stringify({ protocolVersion: 1, id, type: 'call', from: 'vp', recipient: 'server', method, args, expectsResponse: true, source: { app: 'VoicePrompter', version: 'devel' }, timestamp: new Date().toISOString() })); return id;
+        const id = createUuid(); super.send(JSON.stringify({ protocolVersion: 1, id, type: 'call', from: getSocketBox(), recipient: 'server', method, args, expectsResponse: true, source: { app: 'VoicePrompter', version: 'devel' }, timestamp: new Date().toISOString() })); return id;
     }
     private registerConnection(): void { this.admitted = false; this.registerId = this.serverCall('registerConnection', {}); }
     requestReplacement(connectionId: string): void { if (connectionId && this.readyState === NativeWebSocket.OPEN) this.negotiationRequestId = this.serverCall('replaceConnection', { connectionId }); }
@@ -166,8 +211,6 @@ class CoordinatedWebSocket extends NativeWebSocket {
         const result = message.result; if (!result || typeof result !== 'object' || Array.isArray(result)) return; const data = result as JsonObject;
         if (data.status === 'admitted') {
             this.admitted = true; this.registerId = null; this.negotiationRequestId = null; removeNotices(); updateStatusBarControlAvailability(); console.info('[RemoteControl] SUB admitted this VP connection');
-            // remote-control.ts may already have completed its initial ping while this socket was negotiating.
-            // Re-run only its onopen callback so it immediately refreshes SUB/BC state and Status Bar sync.
             if (this.onopen) this.onopen.call(this, new Event('open'));
             return;
         }
@@ -178,7 +221,7 @@ class CoordinatedWebSocket extends NativeWebSocket {
         if (isVpBridgeSocket(this.url) && !this.admitted && typeof data === 'string') {
             try { const message = JSON.parse(data) as JsonObject; if (message.recipient !== 'server') { console.warn('[RemoteControl] Application VPP message suppressed until SUB admits this connection', message); return; } } catch { /* SUB validates malformed traffic */ }
         }
-        super.send(data);
+        super.send(typeof data === 'string' ? transportMessage(data) : data);
     }
     close(code?: number, reason?: string): void {
         if (shouldAnnounceUserDisconnect(this)) { try { super.send(JSON.stringify(createDisconnectingEvent())); } catch { /* best effort */ } }
@@ -186,10 +229,52 @@ class CoordinatedWebSocket extends NativeWebSocket {
     }
 }
 
+function ensureRemoteControlFields(): void {
+    const apiKeyInput = document.getElementById('remoteControlApiKeyInput') as HTMLInputElement | null;
+    const portInput = document.getElementById('remoteControlPortInput') as HTMLInputElement | null;
+    if (!apiKeyInput || !portInput || document.getElementById('remoteControlSocketBoxInput')) return;
+
+    apiKeyInput.type = 'text';
+    const portRow = portInput.closest('div');
+    if (!portRow) return;
+
+    const row = document.createElement('div');
+    row.innerHTML = `
+        <label for="remoteControlSocketBoxInput" class="block text-xs font-bold text-neutral-400 mb-2">Socket Box</label>
+        <input id="remoteControlSocketBoxInput" type="text" autocomplete="off" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-base text-white focus:ring-2 focus:ring-[#FFBB00] focus:border-transparent outline-none transition-all" placeholder="vp">
+    `;
+    portRow.insertAdjacentElement('afterend', row);
+
+    const socketBoxInput = row.querySelector('#remoteControlSocketBoxInput') as HTMLInputElement;
+    socketBoxInput.value = getSocketBox();
+
+    document.getElementById('remoteControlSettingsBtn')?.addEventListener('click', () => {
+        socketBoxInput.value = getSocketBox();
+        apiKeyInput.type = 'text';
+    });
+    document.getElementById('remoteControlResetBtn')?.addEventListener('click', () => {
+        socketBoxInput.value = DEFAULT_SOCKET_BOX;
+    });
+    document.getElementById('remoteControlSaveBtn')?.addEventListener('click', event => {
+        const value = socketBoxInput.value.trim();
+        if (!value || /[/?#\\\s]/.test(value)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            const error = document.getElementById('remoteControlValidationError');
+            if (error) {
+                error.textContent = 'Socket Box must be a non-empty name without spaces, slashes, ? or #.';
+                error.classList.remove('hidden');
+            }
+            socketBoxInput.focus();
+            return;
+        }
+        saveSetting(SOCKET_BOX_SETTING, value);
+    }, true);
+}
+
 window.WebSocket = CoordinatedWebSocket as typeof WebSocket;
 window.addEventListener('DOMContentLoaded', () => {
     updateStatusBarControlAvailability();
-    const apiKeyInput = document.getElementById('remoteControlApiKeyInput') as HTMLInputElement | null;
-    if (apiKeyInput) apiKeyInput.type = 'text';
+    window.setTimeout(ensureRemoteControlFields, 0);
 });
 export function isRemoteControlTakenOver(): boolean { return takenOver; }
