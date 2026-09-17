@@ -61,7 +61,7 @@ function googleDocDevelopmentProxy() {
                     res.statusCode = 200
                     res.setHeader('Content-Type', contentType || (format === 'html' ? 'application/zip' : 'text/plain; charset=utf-8'))
                     res.setHeader('Cache-Control', 'no-store')
-                    res.end(Buffer.from(await upstream.arrayBuffer()))
+                    res.end(new Uint8Array(await upstream.arrayBuffer()))
                 } catch (error) {
                     console.error('[gdoc-proxy] Google Docs fetch failed:', error)
                     res.statusCode = 502; res.end('Google Docs upstream request failed')
