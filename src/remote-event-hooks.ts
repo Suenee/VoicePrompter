@@ -113,7 +113,7 @@ export class RemoteEventHooks {
             return command ? { command, args: [] } : null;
         }
 
-        const command = this.normalizeCommand(body.slice(0, firstArg.index));
+        const command = this.normalizeCommand(body.slice(0, firstArg.index).replace(/,\s*$/, ''));
         if (!command) return null;
 
         const argsText = body.slice(firstArg.index).trim();
@@ -125,6 +125,10 @@ export class RemoteEventHooks {
 
     private isQuote(ch: string): boolean {
         return ch === '"' || ch === '“' || ch === '”';
+    }
+
+    private isArgumentBoundary(body: string, index: number): boolean {
+        return index === 0 || /[\s,]/.test(body[index - 1]);
     }
 
     private findFirstArgument(body: string): { index: number } | null {
@@ -142,12 +146,12 @@ export class RemoteEventHooks {
             }
 
             if (this.isQuote(ch)) {
-                if (i === 0 || /\s/.test(body[i - 1])) return { index: i };
+                if (this.isArgumentBoundary(body, i)) return { index: i };
                 inQuote = true;
                 continue;
             }
 
-            if ((i === 0 || /\s/.test(body[i - 1])) && this.numberStartsAt(body, i)) {
+            if (this.isArgumentBoundary(body, i) && this.numberStartsAt(body, i)) {
                 return { index: i };
             }
         }
@@ -163,41 +167,36 @@ export class RemoteEventHooks {
     private parseArguments(input: string): MarkerArg[] | null {
         const args: MarkerArg[] = [];
         let i = 0;
-        let expectArgument = true;
 
         while (i < input.length) {
-            while (i < input.length && /\s/.test(input[i])) i++;
+            while (i < input.length && /[\s,]/.test(input[i])) i++;
             if (i >= input.length) break;
-
-            if (!expectArgument) {
-                if (input[i] !== ',') return null;
-                i++;
-                expectArgument = true;
-                continue;
-            }
 
             if (this.isQuote(input[i])) {
                 const quoted = this.readQuotedArgument(input, i);
                 if (!quoted) return null;
                 args.push(quoted.value);
                 i = quoted.nextIndex;
-                expectArgument = false;
                 continue;
             }
 
             const numberMatch = input.slice(i).match(/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)/);
-            if (!numberMatch) return null;
+            if (numberMatch) {
+                const token = numberMatch[0];
+                const next = i + token.length;
+                if (next < input.length && !/[\s,]/.test(input[next])) return null;
+                args.push(Number(token));
+                i = next;
+                continue;
+            }
 
-            const token = numberMatch[0];
-            const next = i + token.length;
-            if (next < input.length && !/[\s,]/.test(input[next])) return null;
-
-            args.push(Number(token));
-            i = next;
-            expectArgument = false;
+            const stringMatch = input.slice(i).match(/^[^\s,"]+/);
+            if (!stringMatch || [...stringMatch[0]].some(ch => this.isQuote(ch))) return null;
+            args.push(stringMatch[0]);
+            i += stringMatch[0].length;
         }
 
-        return expectArgument && args.length > 0 ? null : args;
+        return args;
     }
 
     private readQuotedArgument(input: string, start: number): { value: string; nextIndex: number } | null {
