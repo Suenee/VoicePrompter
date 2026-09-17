@@ -32,79 +32,69 @@ function inheritedColor(element: Element | null, colors: Map<string, string>): s
     return null;
 }
 
-/**
- * PHP strip_tags()-style allowlist for source formatting.
- * At present only foreground colour survives. Markers are deliberately plain.
- */
+/** PHP strip_tags()-style allowlist. Currently only foreground colour survives. */
 export function sanitizeSourceHtml(html: string): string {
     const source = new DOMParser().parseFromString(html, 'text/html');
     const colors = classColorMap(source);
     const output = document.implementation.createHTMLDocument('');
     const root = output.createElement('div');
 
-    const append = (node: Node, parent: HTMLElement, inMarker = false): boolean => {
+    const append = (node: Node, parent: HTMLElement): void => {
         if (node.nodeType === Node.TEXT_NODE) {
             const text = node.textContent || '';
-            if (!text) return inMarker;
+            if (!text) return;
             const parts = text.split(/(\[[^\]]*\])/g);
             for (const part of parts) {
                 if (!part) continue;
-                const markerPart = /^\[[^\]]*\]$/.test(part);
-                const textNode = output.createTextNode(part);
-                const color = markerPart ? null : inheritedColor(node.parentElement, colors);
+                const marker = /^\[[^\]]*\]$/.test(part);
+                const color = marker ? null : inheritedColor(node.parentElement, colors);
                 if (color) {
                     const span = output.createElement('span');
                     span.style.color = color;
-                    span.appendChild(textNode);
+                    span.textContent = part;
                     parent.appendChild(span);
-                } else parent.appendChild(textNode);
+                } else parent.appendChild(output.createTextNode(part));
             }
-            return inMarker;
+            return;
         }
-
-        if (!(node instanceof Element)) return inMarker;
+        if (!(node instanceof Element)) return;
         const tag = node.tagName.toLowerCase();
-        const block = /^(p|div|li|h[1-6]|tr)$/.test(tag);
-        if (tag === 'br') { parent.appendChild(output.createElement('br')); return inMarker; }
-
-        for (const child of Array.from(node.childNodes)) inMarker = append(child, parent, inMarker);
-        if (block) parent.appendChild(output.createElement('br'));
-        return inMarker;
+        if (tag === 'br') { parent.appendChild(output.createElement('br')); return; }
+        for (const child of Array.from(node.childNodes)) append(child, parent);
+        if (/^(p|div|li|h[1-6]|tr)$/.test(tag)) parent.appendChild(output.createElement('br'));
     };
 
     for (const child of Array.from(source.body.childNodes)) append(child, root);
     return root.innerHTML.replace(/(?:<br>\s*)+$/i, '');
 }
 
+export function sourceHtmlToText(sanitizedHtml: string): string {
+    const doc = new DOMParser().parseFromString(`<div id="vp-source">${sanitizedHtml}</div>`, 'text/html');
+    const root = doc.getElementById('vp-source');
+    if (!root) return '';
+    for (const br of Array.from(root.querySelectorAll('br'))) br.replaceWith('\n');
+    return root.textContent || '';
+}
+
 async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
-    const bytes = new Uint8Array(buffer);
-    const view = new DataView(buffer);
+    const bytes = new Uint8Array(buffer), view = new DataView(buffer);
     let eocd = -1;
-    for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) {
-        if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-    }
+    for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 65557); i--) if (view.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
     if (eocd < 0) return null;
     const entries = view.getUint16(eocd + 10, true);
     let offset = view.getUint32(eocd + 16, true);
     const decoder = new TextDecoder();
     for (let entry = 0; entry < entries && offset + 46 <= bytes.length; entry++) {
         if (view.getUint32(offset, true) !== 0x02014b50) return null;
-        const method = view.getUint16(offset + 10, true);
-        const compressedSize = view.getUint32(offset + 20, true);
-        const nameLength = view.getUint16(offset + 28, true);
-        const extraLength = view.getUint16(offset + 30, true);
-        const commentLength = view.getUint16(offset + 32, true);
-        const localOffset = view.getUint32(offset + 42, true);
-        const name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+        const method = view.getUint16(offset + 10, true), compressedSize = view.getUint32(offset + 20, true);
+        const nameLength = view.getUint16(offset + 28, true), extraLength = view.getUint16(offset + 30, true), commentLength = view.getUint16(offset + 32, true);
+        const localOffset = view.getUint32(offset + 42, true), name = decoder.decode(bytes.slice(offset + 46, offset + 46 + nameLength));
         if (/\.html?$/i.test(name) && localOffset + 30 <= bytes.length && view.getUint32(localOffset, true) === 0x04034b50) {
-            const localNameLength = view.getUint16(localOffset + 26, true);
-            const localExtraLength = view.getUint16(localOffset + 28, true);
-            const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+            const dataStart = localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
             const compressed = bytes.slice(dataStart, dataStart + compressedSize);
             if (method === 0) return decoder.decode(compressed);
             if (method === 8 && typeof DecompressionStream !== 'undefined') {
-                const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
-                return await new Response(stream).text();
+                return await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
             }
             return null;
         }
@@ -117,16 +107,12 @@ export async function fetchGoogleDocSourceHtml(url: string): Promise<string | nu
     const docId = extractDocId(url);
     if (!docId) return null;
     const local = window.location.port === '5173' || window.location.port === '4173';
-    const proxy = local
-        ? `/gdoc-proxy?id=${encodeURIComponent(docId)}&format=html`
-        : `https://gdoc-proxy.kosuvorov.workers.dev/?id=${encodeURIComponent(docId)}&format=html`;
+    const proxy = local ? `/gdoc-proxy?id=${encodeURIComponent(docId)}&format=html` : `https://gdoc-proxy.kosuvorov.workers.dev/?id=${encodeURIComponent(docId)}&format=html`;
     try {
         const response = await fetch(proxy, { cache: 'no-store' });
         if (!response.ok) return null;
         const type = response.headers.get('content-type') || '';
-        let html: string | null = null;
-        if (type.includes('text/html')) html = await response.text();
-        else html = await unzipFirstHtml(await response.arrayBuffer());
+        const html = type.includes('text/html') ? await response.text() : await unzipFirstHtml(await response.arrayBuffer());
         googleDocHtml = html;
         return html;
     } catch (error) {
@@ -135,10 +121,7 @@ export async function fetchGoogleDocSourceHtml(url: string): Promise<string | nu
     }
 }
 
-export function getCurrentSourceHtml(): string | null {
-    return state.googleDocUrl ? googleDocHtml : pastedHtml;
-}
-
+export function getCurrentSourceHtml(): string | null { return state.googleDocUrl ? googleDocHtml : pastedHtml; }
 export function clearGoogleDocSourceHtml(): void { googleDocHtml = null; }
 
 function insertSettingsToggle(): HTMLInputElement | null {
@@ -149,38 +132,24 @@ function insertSettingsToggle(): HTMLInputElement | null {
     if (!preserveRow?.parentElement) return null;
     const row = document.createElement('div');
     row.className = 'flex items-center justify-between';
-    row.innerHTML = `
-        <div class="flex flex-col"><span class="text-sm text-neutral-300">Text Formatting</span><span class="text-xs text-neutral-500">Use supported formatting from source text</span></div>
-        <label class="relative inline-flex items-center cursor-pointer">
-            <input id="textFormattingToggle" type="checkbox" class="sr-only peer">
-            <div class="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFBB00]"></div>
-        </label>`;
+    row.innerHTML = `<div class="flex flex-col"><span class="text-sm text-neutral-300">Text Formatting</span><span class="text-xs text-neutral-500">Use supported formatting from source text</span></div><label class="relative inline-flex items-center cursor-pointer"><input id="textFormattingToggle" type="checkbox" class="sr-only peer"><div class="w-11 h-6 bg-neutral-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#FFBB00]"></div></label>`;
     preserveRow.insertAdjacentElement('afterend', row);
     return row.querySelector('#textFormattingToggle') as HTMLInputElement;
 }
 
 function installPasteCapture(input: HTMLTextAreaElement): void {
-    input.addEventListener('paste', event => {
-        const html = event.clipboardData?.getData('text/html');
-        if (html) pastedHtml = html;
-    }, true);
-    input.addEventListener('input', event => {
-        if ((event as InputEvent).isTrusted && !(event as InputEvent).inputType?.startsWith('insertFromPaste')) pastedHtml = null;
-    });
+    input.addEventListener('paste', event => { const html = event.clipboardData?.getData('text/html'); if (html) pastedHtml = html; }, true);
+    input.addEventListener('input', event => { if ((event as InputEvent).isTrusted && !(event as InputEvent).inputType?.startsWith('insertFromPaste')) pastedHtml = null; });
 }
 
 function install(): void {
     const toggle = insertSettingsToggle();
     if (toggle) {
         toggle.checked = state.config.textFormattingEnabled;
-        toggle.addEventListener('change', () => {
-            state.config.textFormattingEnabled = toggle.checked;
-            window.dispatchEvent(new CustomEvent('vp-text-formatting-refresh'));
-        });
+        toggle.addEventListener('change', () => { state.config.textFormattingEnabled = toggle.checked; window.dispatchEvent(new CustomEvent('vp-text-formatting-refresh')); });
     }
     const input = document.getElementById('inputScript') as HTMLTextAreaElement | null;
     if (input) installPasteCapture(input);
 }
 
-if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install, { once: true });
-else install();
+if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install, { once: true }); else install();
