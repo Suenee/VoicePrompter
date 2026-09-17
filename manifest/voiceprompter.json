@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "voiceprompter",
   "name": "VoicePrompter",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "VoicePrompter control and synchronization profile for Socket Universe Module.",
   "vppVersion": 1,
   "namespace": "vp",
@@ -82,7 +82,8 @@
     { "id": "mirror_mode", "name": "Mirror Mode state (on/off)", "initial": "" },
     { "id": "rotate_screen", "name": "Rotate Screen state (on/off)", "initial": "" },
     { "id": "recording_dock_opacity", "name": "Recording Dock opacity (%)", "initial": "" },
-    { "id": "google_doc_url", "name": "Current Google Docs URL", "initial": "" }
+    { "id": "google_doc_url", "name": "Current Google Docs URL", "initial": "" },
+    { "id": "text_formatting", "name": "Text Formatting state (on/off)", "initial": "" }
   ],
   "dynamicVariables": [
     {
@@ -103,7 +104,8 @@
       "mirrorMode": { "variableId": "mirror_mode", "type": "enum", "values": ["on", "off"] },
       "rotateScreen": { "variableId": "rotate_screen", "type": "enum", "values": ["on", "off"] },
       "recordingDockOpacity": { "variableId": "recording_dock_opacity", "type": "integer", "min": 30, "max": 100 },
-      "googleDocUrl": { "variableId": "google_doc_url", "type": "string" }
+      "googleDocUrl": { "variableId": "google_doc_url", "type": "string" },
+      "textFormatting": { "variableId": "text_formatting", "type": "enum", "values": ["on", "off"] }
     }
   },
   "memory": {
@@ -347,6 +349,16 @@
       "method": "setRotateScreen",
       "expectsResponse": true,
       "queueByOption": { "option": "state", "fifoValues": ["toggle"], "replaceKey": "rotateScreen" },
+      "options": [
+        { "type": "dropdown", "id": "state", "label": "State", "default": "toggle", "arg": "state", "parse": "enum", "values": ["on", "off", "toggle"], "choices": [{"id":"on","label":"On"},{"id":"off","label":"Off"},{"id":"toggle","label":"Toggle"}] }
+      ]
+    },
+    "text_formatting": {
+      "name": "Document: Text Formatting",
+      "operation": "call",
+      "method": "setTextFormatting",
+      "expectsResponse": true,
+      "queueByOption": { "option": "state", "fifoValues": ["toggle"], "replaceKey": "textFormatting" },
       "options": [
         { "type": "dropdown", "id": "state", "label": "State", "default": "toggle", "arg": "state", "parse": "enum", "values": ["on", "off", "toggle"], "choices": [{"id":"on","label":"On"},{"id":"off","label":"Off"},{"id":"toggle","label":"Toggle"}] }
       ]
