@@ -3,6 +3,8 @@ import { extractDocId } from './gdoc';
 
 let pastedHtml: string | null = null;
 let googleDocHtml: string | null = null;
+let googleDocHtmlUrl: string | null = null;
+let applying = false;
 
 function classColorMap(doc: Document): Map<string, string> {
     const colors = new Map<string, string>();
@@ -68,14 +70,6 @@ export function sanitizeSourceHtml(html: string): string {
     return root.innerHTML.replace(/(?:<br>\s*)+$/i, '');
 }
 
-export function sourceHtmlToText(sanitizedHtml: string): string {
-    const doc = new DOMParser().parseFromString(`<div id="vp-source">${sanitizedHtml}</div>`, 'text/html');
-    const root = doc.getElementById('vp-source');
-    if (!root) return '';
-    for (const br of Array.from(root.querySelectorAll('br'))) br.replaceWith('\n');
-    return root.textContent || '';
-}
-
 async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
     const bytes = new Uint8Array(buffer), view = new DataView(buffer);
     let eocd = -1;
@@ -93,9 +87,7 @@ async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
             const dataStart = localOffset + 30 + view.getUint16(localOffset + 26, true) + view.getUint16(localOffset + 28, true);
             const compressed = bytes.slice(dataStart, dataStart + compressedSize);
             if (method === 0) return decoder.decode(compressed);
-            if (method === 8 && typeof DecompressionStream !== 'undefined') {
-                return await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
-            }
+            if (method === 8 && typeof DecompressionStream !== 'undefined') return await new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).text();
             return null;
         }
         offset += 46 + nameLength + extraLength + commentLength;
@@ -103,7 +95,7 @@ async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
     return null;
 }
 
-export async function fetchGoogleDocSourceHtml(url: string): Promise<string | null> {
+async function fetchGoogleDocSourceHtml(url: string): Promise<string | null> {
     const docId = extractDocId(url);
     if (!docId) return null;
     const local = window.location.port === '5173' || window.location.port === '4173';
@@ -113,7 +105,7 @@ export async function fetchGoogleDocSourceHtml(url: string): Promise<string | nu
         if (!response.ok) return null;
         const type = response.headers.get('content-type') || '';
         const html = type.includes('text/html') ? await response.text() : await unzipFirstHtml(await response.arrayBuffer());
-        googleDocHtml = html;
+        if (html) { googleDocHtml = html; googleDocHtmlUrl = url; }
         return html;
     } catch (error) {
         console.warn('[Text Formatting] Could not retrieve source HTML:', error);
@@ -121,8 +113,43 @@ export async function fetchGoogleDocSourceHtml(url: string): Promise<string | nu
     }
 }
 
-export function getCurrentSourceHtml(): string | null { return state.googleDocUrl ? googleDocHtml : pastedHtml; }
-export function clearGoogleDocSourceHtml(): void { googleDocHtml = null; }
+function colorsFromSanitizedHtml(html: string): Array<string | null> {
+    const doc = new DOMParser().parseFromString(`<div id="vp-source">${html}</div>`, 'text/html');
+    const root = doc.getElementById('vp-source');
+    if (!root) return [];
+    const colors: Array<string | null> = [];
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+        const color = (node.parentElement as HTMLElement | null)?.style?.color || null;
+        for (const _ of (node.textContent || '').matchAll(/\S+/g)) colors.push(color);
+    }
+    return colors;
+}
+
+async function applyCurrentSourceFormatting(): Promise<void> {
+    if (applying) return;
+    applying = true;
+    try {
+        for (const word of state.scriptWords) word.element?.style.removeProperty('color');
+        if (!state.config.textFormattingEnabled) return;
+
+        let sourceHtml = state.googleDocUrl ? googleDocHtml : pastedHtml;
+        if (state.googleDocUrl && (!sourceHtml || googleDocHtmlUrl !== state.googleDocUrl)) sourceHtml = await fetchGoogleDocSourceHtml(state.googleDocUrl);
+        if (!sourceHtml) return;
+
+        // The source is filtered once. Rendering then consumes the surviving
+        // formatting in source order; there is no word search/rematching pass.
+        const colors = colorsFromSanitizedHtml(sanitizeSourceHtml(sourceHtml));
+        let sourceIndex = 0;
+        for (const word of state.scriptWords) {
+            if (word.isBreak || word.isStop) continue;
+            const color = colors[sourceIndex++] || null;
+            if (word.skip || word.element?.closest('.slide-marker-row')) continue;
+            if (color && word.element) word.element.style.color = color;
+        }
+    } finally { applying = false; }
+}
 
 function insertSettingsToggle(): HTMLInputElement | null {
     const existing = document.getElementById('textFormattingToggle') as HTMLInputElement | null;
@@ -138,7 +165,7 @@ function insertSettingsToggle(): HTMLInputElement | null {
 }
 
 function installPasteCapture(input: HTMLTextAreaElement): void {
-    input.addEventListener('paste', event => { const html = event.clipboardData?.getData('text/html'); if (html) pastedHtml = html; }, true);
+    input.addEventListener('paste', event => { const html = event.clipboardData?.getData('text/html'); pastedHtml = html || null; }, true);
     input.addEventListener('input', event => { if ((event as InputEvent).isTrusted && !(event as InputEvent).inputType?.startsWith('insertFromPaste')) pastedHtml = null; });
 }
 
@@ -146,10 +173,16 @@ function install(): void {
     const toggle = insertSettingsToggle();
     if (toggle) {
         toggle.checked = state.config.textFormattingEnabled;
-        toggle.addEventListener('change', () => { state.config.textFormattingEnabled = toggle.checked; window.dispatchEvent(new CustomEvent('vp-text-formatting-refresh')); });
+        toggle.addEventListener('change', () => { state.config.textFormattingEnabled = toggle.checked; void applyCurrentSourceFormatting(); });
     }
     const input = document.getElementById('inputScript') as HTMLTextAreaElement | null;
     if (input) installPasteCapture(input);
+    const script = document.getElementById('scriptContent');
+    if (script) {
+        const observer = new MutationObserver(() => { if (!applying) void applyCurrentSourceFormatting(); });
+        observer.observe(script, { childList: true, subtree: true });
+    }
+    window.addEventListener('vp-text-formatting-refresh', () => { void applyCurrentSourceFormatting(); });
 }
 
 if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install, { once: true }); else install();
