@@ -44,23 +44,24 @@ function googleDocDevelopmentProxy() {
                 try {
                     const requestUrl = new URL(req.url || '/', 'http://localhost')
                     const docId = requestUrl.searchParams.get('id') || ''
+                    const format = requestUrl.searchParams.get('format') === 'html' ? 'html' : 'txt'
                     if (!DOC_ID_RE.test(docId)) {
                         res.statusCode = 400; res.end('Missing or invalid Google Doc ID'); return
                     }
-                    const upstream = await fetch(`https://docs.google.com/document/d/${docId}/export?format=txt`, { redirect: 'follow' })
+                    const upstream = await fetch(`https://docs.google.com/document/d/${docId}/export?format=${format}`, { redirect: 'follow' })
                     if (!upstream.ok) {
                         res.statusCode = upstream.status === 404 ? 404 : 403
                         res.end('Could not fetch document. Make sure it is shared as "Anyone with the link" (Viewer).')
                         return
                     }
                     const contentType = upstream.headers.get('content-type') || ''
-                    if (contentType.includes('text/html')) {
+                    if (format === 'txt' && contentType.includes('text/html')) {
                         res.statusCode = 403; res.end('Document is not public. Share it as "Anyone with the link" (Viewer) and try again.'); return
                     }
                     res.statusCode = 200
-                    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+                    res.setHeader('Content-Type', contentType || (format === 'html' ? 'application/zip' : 'text/plain; charset=utf-8'))
                     res.setHeader('Cache-Control', 'no-store')
-                    res.end(await upstream.text())
+                    res.end(Buffer.from(await upstream.arrayBuffer()))
                 } catch (error) {
                     console.error('[gdoc-proxy] Google Docs fetch failed:', error)
                     res.statusCode = 502; res.end('Google Docs upstream request failed')
