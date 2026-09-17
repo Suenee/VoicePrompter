@@ -8,7 +8,6 @@ export interface ScriptWord {
     skip: boolean;
     isStop: boolean;
     isBreak?: boolean;
-    sourceColor?: string;
 }
 
 export interface AppConfig {
