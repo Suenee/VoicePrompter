@@ -10,6 +10,7 @@ export const DEFAULT_APP_CONFIG: AppConfig = {
     textDirection: 'ltr',
     showStopIcon: false,
     preserveFormatting: true,
+    textFormattingEnabled: false,
     voiceCommandsEnabled: false,
     navigationControlsEnabled: false,
     paragraphSpacing: 0.5,
