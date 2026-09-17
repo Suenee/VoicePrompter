@@ -13,7 +13,8 @@ type SynchronizedSettingName =
     | 'mirrorMode'
     | 'rotateScreen'
     | 'recordingDockOpacity'
-    | 'googleDocUrl';
+    | 'googleDocUrl'
+    | 'textFormatting';
 
 function emitSynchronizedSettingChanged(setting: SynchronizedSettingName, value: string | number): void {
     window.dispatchEvent(new CustomEvent(SYNCHRONIZED_SETTING_CHANGED_EVENT, {
@@ -28,6 +29,9 @@ function emitConfigSettingChange(property: string, value: unknown): void {
             break;
         case 'navigationControlsEnabled':
             emitSynchronizedSettingChanged('navigationControls', value ? 'on' : 'off');
+            break;
+        case 'textFormattingEnabled':
+            emitSynchronizedSettingChanged('textFormatting', value ? 'on' : 'off');
             break;
         case 'fontSize':
             emitSynchronizedSettingChanged('fontSize', value as number);
@@ -190,3 +194,4 @@ window.addEventListener('DOMContentLoaded', () => {
 // Install the VPP synchronized-settings layer after this module has finished
 // creating the state proxies. Dynamic import avoids a state/handler init cycle.
 void import('./vpp-settings-sync');
+void import('./text-formatting');
