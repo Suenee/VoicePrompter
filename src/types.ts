@@ -8,6 +8,7 @@ export interface ScriptWord {
     skip: boolean;
     isStop: boolean;
     isBreak?: boolean;
+    sourceColor?: string;
 }
 
 export interface AppConfig {
@@ -20,6 +21,7 @@ export interface AppConfig {
     textDirection: 'ltr' | 'rtl';
     showStopIcon: boolean;
     preserveFormatting: boolean;
+    textFormattingEnabled: boolean;
     voiceCommandsEnabled: boolean;
     navigationControlsEnabled: boolean;
     paragraphSpacing: number;
