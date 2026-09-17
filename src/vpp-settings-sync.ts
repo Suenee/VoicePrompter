@@ -16,7 +16,8 @@ type SynchronizedSettingName =
     | 'mirrorMode'
     | 'rotateScreen'
     | 'recordingDockOpacity'
-    | 'googleDocUrl';
+    | 'googleDocUrl'
+    | 'textFormatting';
 
 interface InternalRemoteCommandHandler {
     publicMethods: Record<string, PublicHandler>;
@@ -52,6 +53,7 @@ function getSettingValue(setting: SynchronizedSettingName): SettingValue {
         case 'rotateScreen': return onOff(state.isScreenRotated);
         case 'recordingDockOpacity': return getRecordingDockOpacitySetting();
         case 'googleDocUrl': return state.googleDocUrl ?? '';
+        case 'textFormatting': return onOff(state.config.textFormattingEnabled);
     }
 }
 
@@ -69,7 +71,8 @@ function getSettingsSnapshot(): JsonObject {
         mirrorMode: getSettingValue('mirrorMode'),
         rotateScreen: getSettingValue('rotateScreen'),
         recordingDockOpacity: getSettingValue('recordingDockOpacity'),
-        googleDocUrl: getSettingValue('googleDocUrl')
+        googleDocUrl: getSettingValue('googleDocUrl'),
+        textFormatting: getSettingValue('textFormatting')
     };
 }
 
@@ -139,6 +142,14 @@ function setNavigationControls(requested: ToggleState): void {
     document.getElementById('navigationControlsGroup')?.classList.toggle('hidden', !desired);
 }
 
+function setTextFormatting(requested: ToggleState): void {
+    const desired = targetBoolean(state.config.textFormattingEnabled, requested);
+    const toggle = document.getElementById('textFormattingToggle') as HTMLInputElement | null;
+    state.config.textFormattingEnabled = desired;
+    if (toggle) toggle.checked = desired;
+    window.dispatchEvent(new Event('vp-text-formatting-refresh'));
+}
+
 function wrapSimpleSettingMethod(
     method: string,
     setting: SynchronizedSettingName
@@ -159,6 +170,17 @@ function validateExtensionCall(message: JsonObject, method: string): string | nu
     return null;
 }
 
+function validateToggleCall(message: JsonObject, method: string): string | null {
+    const commonError = validateExtensionCall(message, method);
+    if (commonError) return commonError;
+    const args = message.args as JsonObject;
+    const keys = Object.keys(args);
+    if (keys.length !== 1 || keys[0] !== 'state') return `${method} accepts exactly the state argument`;
+    const requested = args.state;
+    if (requested !== 'on' && requested !== 'off' && requested !== 'toggle') return `${method}.state must be on, off or toggle`;
+    return null;
+}
+
 function install(): void {
     if (installState[installKey]) return;
     installState[installKey] = true;
@@ -173,16 +195,8 @@ function install(): void {
             return null;
         }
 
-        if (message.method === 'setNavigationControls') {
-            const commonError = validateExtensionCall(message, 'setNavigationControls');
-            if (commonError) return commonError;
-            const args = message.args as JsonObject;
-            const keys = Object.keys(args);
-            if (keys.length !== 1 || keys[0] !== 'state') return 'setNavigationControls accepts exactly the state argument';
-            const requested = args.state;
-            if (requested !== 'on' && requested !== 'off' && requested !== 'toggle') return 'setNavigationControls.state must be on, off or toggle';
-            return null;
-        }
+        if (message.method === 'setNavigationControls') return validateToggleCall(message, 'setNavigationControls');
+        if (message.method === 'setTextFormatting') return validateToggleCall(message, 'setTextFormatting');
 
         return originalValidateCall(message);
     };
@@ -191,6 +205,10 @@ function install(): void {
     internal.publicMethods.setNavigationControls = async args => runRemoteMutation(async () => {
         setNavigationControls(args.state as ToggleState);
         return settingResult('navigationControls');
+    });
+    internal.publicMethods.setTextFormatting = async args => runRemoteMutation(async () => {
+        setTextFormatting(args.state as ToggleState);
+        return settingResult('textFormatting');
     });
 
     const originalMicrophone = internal.publicMethods.setMicrophone;
