@@ -164,7 +164,8 @@ function clearAllowedFormatting(): void {
     for (const word of state.scriptWords) {
         const element = word.element;
         if (!element) continue;
-        element.style.removeProperty('color');
+        element.style.removeProperty('--vp-source-color');
+        element.classList.remove('vp-source-color');
         element.style.removeProperty('font-weight');
         element.style.removeProperty('font-style');
         element.style.removeProperty('text-decoration');
@@ -197,7 +198,10 @@ async function applyCurrentSourceFormatting(): Promise<void> {
             if (word.skip || word.element?.closest('.slide-marker-row')) continue;
             const element = word.element;
             if (!element) continue;
-            if (token.color) element.style.color = token.color;
+            if (token.color) {
+                element.style.setProperty('--vp-source-color', token.color);
+                element.classList.add('vp-source-color');
+            }
             if (token.bold) element.style.fontWeight = 'bold';
             if (token.italic) element.style.fontStyle = 'italic';
             if (token.underline) element.style.textDecoration = 'underline';
