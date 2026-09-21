@@ -132,6 +132,12 @@ input[type=range]::-moz-range-track {
     @apply opacity-80;
 }
 
+/* Source document color is intentionally limited to unread text.
+   Reading-state colors (past/current) remain authoritative. */
+.script-word.text-future.vp-source-color {
+    color: var(--vp-source-color);
+}
+
 .text-past {
     @apply opacity-50;
 }
