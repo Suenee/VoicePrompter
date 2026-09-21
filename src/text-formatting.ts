@@ -34,16 +34,7 @@ function inheritedColor(element: Element | null, colors: Map<string, string>): s
     return null;
 }
 
-const ALLOWED_FORMAT_TAGS = new Set(['b', 'strong', 'i', 'em', 'u', 'span']);
-
-function isMarkerText(text: string): boolean {
-    return /^\\s*\\[[^\\]]*\\]\\s*$/.test(text);
-}
-
-/**
- * HTML allowlist. Unsupported elements/attributes are removed, while their
- * text content survives. Supported formatting is preserved as HTML.
- */
+/** PHP strip_tags()-style allowlist. Currently only foreground colour survives. */
 export function sanitizeSourceHtml(html: string): string {
     const source = new DOMParser().parseFromString(html, 'text/html');
     const colors = classColorMap(source);
@@ -52,41 +43,31 @@ export function sanitizeSourceHtml(html: string): string {
 
     const append = (node: Node, parent: HTMLElement): void => {
         if (node.nodeType === Node.TEXT_NODE) {
-            parent.appendChild(output.createTextNode(node.textContent || ''));
+            const text = node.textContent || '';
+            if (!text) return;
+            const parts = text.split(/(\[[^\]]*\])/g);
+            for (const part of parts) {
+                if (!part) continue;
+                const marker = /^\[[^\]]*\]$/.test(part);
+                const color = marker ? null : inheritedColor(node.parentElement, colors);
+                if (color) {
+                    const span = output.createElement('span');
+                    span.style.color = color;
+                    span.textContent = part;
+                    parent.appendChild(span);
+                } else parent.appendChild(output.createTextNode(part));
+            }
             return;
         }
         if (!(node instanceof Element)) return;
-
         const tag = node.tagName.toLowerCase();
-        if (tag === 'br') {
-            parent.appendChild(output.createElement('br'));
-            return;
-        }
-
-        const marker = isMarkerText(node.textContent || '');
-        let target = parent;
-        if (!marker && ALLOWED_FORMAT_TAGS.has(tag)) {
-            const allowed = output.createElement(tag);
-            const color = inheritedColor(node, colors);
-            if (color) allowed.style.color = color;
-            parent.appendChild(allowed);
-            target = allowed;
-        } else if (!marker) {
-            const color = inheritedColor(node, colors);
-            if (color) {
-                const span = output.createElement('span');
-                span.style.color = color;
-                parent.appendChild(span);
-                target = span;
-            }
-        }
-
-        for (const child of Array.from(node.childNodes)) append(child, target);
+        if (tag === 'br') { parent.appendChild(output.createElement('br')); return; }
+        for (const child of Array.from(node.childNodes)) append(child, parent);
         if (/^(p|div|li|h[1-6]|tr)$/.test(tag)) parent.appendChild(output.createElement('br'));
     };
 
     for (const child of Array.from(source.body.childNodes)) append(child, root);
-    return root.innerHTML.replace(/(?:<br>\\s*)+$/i, '');
+    return root.innerHTML.replace(/(?:<br>\s*)+$/i, '');
 }
 
 async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
@@ -132,80 +113,40 @@ async function fetchGoogleDocSourceHtml(url: string): Promise<string | null> {
     }
 }
 
-interface SourceFormatToken {
-    color: string | null;
-    bold: boolean;
-    italic: boolean;
-    underline: boolean;
-}
-
-function sourceFormatTokens(html: string): SourceFormatToken[] {
-    const doc = new DOMParser().parseFromString(`<div id="vp-source">${sanitizeSourceHtml(html)}</div>`, 'text/html');
+function colorsFromSanitizedHtml(html: string): Array<string | null> {
+    const doc = new DOMParser().parseFromString(`<div id="vp-source">${html}</div>`, 'text/html');
     const root = doc.getElementById('vp-source');
     if (!root) return [];
-
-    const tokens: SourceFormatToken[] = [];
+    const colors: Array<string | null> = [];
     const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node: Node | null;
     while ((node = walker.nextNode())) {
-        const parent = node.parentElement;
-        const colorElement = parent?.closest<HTMLElement>('[style*="color"]') ?? null;
-        const color = colorElement?.style.color || null;
-        const bold = !!parent?.closest('b,strong');
-        const italic = !!parent?.closest('i,em');
-        const underline = !!parent?.closest('u');
-        for (const _ of (node.textContent || '').matchAll(/\\S+/g)) {
-            tokens.push({ color, bold, italic, underline });
-        }
+        const color = (node.parentElement as HTMLElement | null)?.style?.color || null;
+        for (const _ of (node.textContent || '').matchAll(/\S+/g)) colors.push(color);
     }
-    return tokens;
-}
-
-function clearAllowedFormatting(): void {
-    for (const word of state.scriptWords) {
-        const element = word.element;
-        if (!element) continue;
-        element.style.removeProperty('--vp-source-color');
-        element.classList.remove('vp-source-color');
-        element.style.removeProperty('font-weight');
-        element.style.removeProperty('font-style');
-        element.style.removeProperty('text-decoration');
-    }
+    return colors;
 }
 
 async function applyCurrentSourceFormatting(): Promise<void> {
     if (applying) return;
     applying = true;
     try {
-        clearAllowedFormatting();
+        for (const word of state.scriptWords) word.element?.style.removeProperty('color');
         if (!state.config.textFormattingEnabled) return;
 
         let sourceHtml = state.googleDocUrl ? googleDocHtml : pastedHtml;
         if (state.googleDocUrl && (!sourceHtml || googleDocHtmlUrl !== state.googleDocUrl)) sourceHtml = await fetchGoogleDocSourceHtml(state.googleDocUrl);
         if (!sourceHtml) return;
 
-        /*
-         * The sanitizer is the formatting authority. It strips everything that
-         * is not explicitly allowed. This pass only projects the surviving HTML
-         * formatting onto VP's mandatory per-word navigation spans, strictly in
-         * source DOM order. It never searches for text or guesses formatting.
-         */
-        const tokens = sourceFormatTokens(sourceHtml);
+        // The source is filtered once. Rendering then consumes the surviving
+        // formatting in source order; there is no word search/rematching pass.
+        const colors = colorsFromSanitizedHtml(sanitizeSourceHtml(sourceHtml));
         let sourceIndex = 0;
         for (const word of state.scriptWords) {
             if (word.isBreak || word.isStop) continue;
-            const token = tokens[sourceIndex++];
-            if (!token) break;
+            const color = colors[sourceIndex++] || null;
             if (word.skip || word.element?.closest('.slide-marker-row')) continue;
-            const element = word.element;
-            if (!element) continue;
-            if (token.color) {
-                element.style.setProperty('--vp-source-color', token.color);
-                element.classList.add('vp-source-color');
-            }
-            if (token.bold) element.style.fontWeight = 'bold';
-            if (token.italic) element.style.fontStyle = 'italic';
-            if (token.underline) element.style.textDecoration = 'underline';
+            if (color && word.element) word.element.style.color = color;
         }
     } finally { applying = false; }
 }
