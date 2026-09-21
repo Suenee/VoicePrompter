@@ -454,8 +454,16 @@ export class RemoteCommandHandler {
     }
 
     public async setMicrophone(args: JsonObject): Promise<void> {
-        const controls = await import('./remote-vpp-controls');
-        controls.setMicrophoneState(args.state as ToggleState);
+        // Keep the emergency microphone path independent of the consolidated
+        // VPP controls module. If an unrelated control dependency fails to load,
+        // MIC must still remain available during a live production.
+        const [{ els }, { state }] = await Promise.all([
+            import('./elements'),
+            import('./state')
+        ]);
+        const requested = args.state as ToggleState;
+        const desired = requested === 'toggle' ? !state.isListening : requested === 'on';
+        if (desired !== state.isListening) els.micButton.click();
     }
 
     public async setFontSize(args: JsonObject): Promise<void> {
