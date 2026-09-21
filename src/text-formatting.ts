@@ -149,7 +149,8 @@ function sourceFormatTokens(html: string): SourceFormatToken[] {
     let node: Node | null;
     while ((node = walker.nextNode())) {
         const parent = node.parentElement;
-        const color = (parent as HTMLElement | null)?.style?.color || null;
+        const colorElement = parent?.closest<HTMLElement>('[style*="color"]') ?? null;
+        const color = colorElement?.style.color || null;
         const bold = !!parent?.closest('b,strong');
         const italic = !!parent?.closest('i,em');
         const underline = !!parent?.closest('u');
