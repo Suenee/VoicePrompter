@@ -132,10 +132,18 @@ input[type=range]::-moz-range-track {
     @apply opacity-80;
 }
 
-/* Source document color is intentionally limited to unread text.
-   Reading-state colors (past/current) remain authoritative. */
+/* Source formatting is only allowed to affect unread words.
+   VoicePrompter reading state always has higher priority. */
 .script-word.text-future.vp-source-color {
-    color: var(--vp-source-color);
+    color: var(--vp-source-color) !important;
+}
+
+.script-word.text-neutral-500 {
+    color: rgb(115 115 115) !important;
+}
+
+.highlight-active-word .script-word.current-word {
+    color: rgb(249 115 22) !important;
 }
 
 .text-past {
