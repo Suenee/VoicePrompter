@@ -7,7 +7,7 @@ let googleDocHtml: string | null = null;
 let googleDocHtmlUrl: string | null = null;
 
 const ALLOWED_TAGS = new Set(['span', 'b', 'strong', 'i', 'em', 'u']);
-const ALLOWED_STYLES = new Set(['color']);
+const ALLOWED_STYLES = new Set(['color', 'font-weight', 'font-style']);
 const BLOCK_TAGS = /^(p|div|li|h[1-6]|tr)$/i;
 
 function classStyleMap(doc: Document): Map<string, Map<string, string>> {
@@ -88,7 +88,10 @@ export function sanitizeSourceHtml(html: string): string {
         const target = (keepStyleTag || keepStructuralTag) && ALLOWED_TAGS.has(tag) ? output.createElement(tag) : parent;
         if (target !== parent) {
             const styles = allowedStyle(node, classStyles);
-            if (state.config.sourceColorsEnabled) styles.forEach((value, property) => target.style.setProperty(property, value));
+            styles.forEach((value, property) => {
+                if (property === 'color' && state.config.sourceColorsEnabled) target.style.setProperty(property, value);
+                if ((property === 'font-weight' || property === 'font-style') && state.config.sourceStylesEnabled) target.style.setProperty(property, value);
+            });
             parent.appendChild(target);
         }
 
