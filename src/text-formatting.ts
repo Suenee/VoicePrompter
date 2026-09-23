@@ -97,8 +97,8 @@ export function sanitizeSourceHtml(html: string): string {
 
         for (const child of Array.from(node.childNodes)) append(child, target);
         if (BLOCK_TAGS.test(tag)) {
-            if (state.config.preserveFormatting) root.appendChild(output.createElement('br'));
-            else root.appendChild(output.createTextNode(' '));
+            if (state.config.preserveFormatting) parent.appendChild(output.createElement('br'));
+            else parent.appendChild(output.createTextNode(' '));
         }
     };
 
