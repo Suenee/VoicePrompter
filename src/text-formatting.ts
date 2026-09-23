@@ -72,7 +72,7 @@ export function sanitizeSourceHtml(html: string): string {
                     const marker = output.createElement('span');
                     marker.setAttribute('data-vp-marker', '');
                     marker.textContent = part;
-                    root.appendChild(marker);
+                    parent.appendChild(marker);
                 } else {
                     parent.appendChild(output.createTextNode(part));
                 }
