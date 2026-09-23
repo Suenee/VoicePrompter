@@ -21,6 +21,8 @@ export interface AppConfig {
     showStopIcon: boolean;
     preserveFormatting: boolean;
     textFormattingEnabled: boolean;
+    sourceColorsEnabled: boolean;
+    sourceStylesEnabled: boolean;
     voiceCommandsEnabled: boolean;
     navigationControlsEnabled: boolean;
     paragraphSpacing: number;
