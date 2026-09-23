@@ -17,7 +17,10 @@ type SynchronizedSettingName =
     | 'rotateScreen'
     | 'recordingDockOpacity'
     | 'googleDocUrl'
-    | 'textFormatting';
+    | 'textFormatting'
+    | 'formatParagraphs'
+    | 'formatColors'
+    | 'formatStyle';
 
 interface InternalRemoteCommandHandler {
     publicMethods: Record<string, PublicHandler>;
@@ -54,6 +57,9 @@ function getSettingValue(setting: SynchronizedSettingName): SettingValue {
         case 'recordingDockOpacity': return getRecordingDockOpacitySetting();
         case 'googleDocUrl': return state.googleDocUrl ?? '';
         case 'textFormatting': return onOff(state.config.textFormattingEnabled);
+        case 'formatParagraphs': return onOff(state.config.preserveFormatting);
+        case 'formatColors': return onOff(state.config.sourceColorsEnabled);
+        case 'formatStyle': return onOff(state.config.sourceStylesEnabled);
     }
 }
 
@@ -72,7 +78,10 @@ function getSettingsSnapshot(): JsonObject {
         rotateScreen: getSettingValue('rotateScreen'),
         recordingDockOpacity: getSettingValue('recordingDockOpacity'),
         googleDocUrl: getSettingValue('googleDocUrl'),
-        textFormatting: getSettingValue('textFormatting')
+        textFormatting: getSettingValue('textFormatting'),
+        formatParagraphs: getSettingValue('formatParagraphs'),
+        formatColors: getSettingValue('formatColors'),
+        formatStyle: getSettingValue('formatStyle')
     };
 }
 
@@ -142,6 +151,16 @@ function setNavigationControls(requested: ToggleState): void {
     document.getElementById('navigationControlsGroup')?.classList.toggle('hidden', !desired);
 }
 
+function setFormattingPart(part: 'paragraphs' | 'colors' | 'style', requested: ToggleState): void {
+    const current = part === 'paragraphs' ? state.config.preserveFormatting : part === 'colors' ? state.config.sourceColorsEnabled : state.config.sourceStylesEnabled;
+    const desired = targetBoolean(current, requested);
+    if (part === 'paragraphs') state.config.preserveFormatting = desired;
+    else if (part === 'colors') state.config.sourceColorsEnabled = desired;
+    else state.config.sourceStylesEnabled = desired;
+    state.config.textFormattingEnabled = state.config.sourceColorsEnabled || state.config.sourceStylesEnabled;
+    window.dispatchEvent(new CustomEvent('vp-text-formatting-changed'));
+}
+
 function setTextFormatting(requested: ToggleState): void {
     const desired = targetBoolean(state.config.textFormattingEnabled, requested);
     const toggle = document.getElementById('textFormattingToggle') as HTMLInputElement | null;
@@ -197,6 +216,9 @@ function install(): void {
 
         if (message.method === 'setNavigationControls') return validateToggleCall(message, 'setNavigationControls');
         if (message.method === 'setTextFormatting') return validateToggleCall(message, 'setTextFormatting');
+        if (message.method === 'setFormatParagraphs') return validateToggleCall(message, 'setFormatParagraphs');
+        if (message.method === 'setFormatColors') return validateToggleCall(message, 'setFormatColors');
+        if (message.method === 'setFormatStyle') return validateToggleCall(message, 'setFormatStyle');
 
         return originalValidateCall(message);
     };
@@ -210,6 +232,9 @@ function install(): void {
         setTextFormatting(args.state as ToggleState);
         return settingResult('textFormatting');
     });
+    internal.publicMethods.setFormatParagraphs = async args => runRemoteMutation(async () => { setFormattingPart('paragraphs', args.state as ToggleState); return settingResult('formatParagraphs'); });
+    internal.publicMethods.setFormatColors = async args => runRemoteMutation(async () => { setFormattingPart('colors', args.state as ToggleState); return settingResult('formatColors'); });
+    internal.publicMethods.setFormatStyle = async args => runRemoteMutation(async () => { setFormattingPart('style', args.state as ToggleState); return settingResult('formatStyle'); });
 
     const originalMicrophone = internal.publicMethods.setMicrophone;
     if (originalMicrophone) {
