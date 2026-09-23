@@ -11,6 +11,7 @@ import { ScriptWord, ScrollingMode } from './types';
 import { enterVideoMode, exitVideoMode, toggleVideoLayout, startRecording, stopRecording, flipCamera, getMediaConstraints } from './video';
 import { detectAll } from 'tinyld/light';
 import { fetchGoogleDocText } from './gdoc';
+import { fetchGoogleDocSourceHtml } from './text-formatting';
 import { enumerateAndPopulateDevices } from './devices';
 import { detectVisitorPlatform, getNativePromo } from './platform-promo';
 
@@ -296,8 +297,8 @@ els.pasteScriptBtn.addEventListener('click', async () => { (window as any).umami
 els.importGoogleDocBtn.addEventListener('click', () => { (window as any).umami?.track('open-google-doc-modal'); els.googleDocUrlInput.value = ''; els.googleDocModal.classList.remove('hidden'); els.googleDocUrlInput.focus(); });
 els.closeGoogleDocModalBtn.addEventListener('click', () => els.googleDocModal.classList.add('hidden'));
 els.pasteGoogleDocUrlBtn.addEventListener('click', async () => { (window as any).umami?.track('paste-google-doc-url'); try { const text = await navigator.clipboard.readText(); els.googleDocUrlInput.value = text.trim(); els.googleDocUrlInput.focus(); } catch (err) { console.error('Failed to paste Google Doc URL!', err); } });
-els.confirmGoogleDocImportBtn.addEventListener('click', async () => { const url = els.googleDocUrlInput.value.trim(); if (!url) { alert('Please enter a Google Doc URL.'); return; } const btn = els.confirmGoogleDocImportBtn as HTMLButtonElement; const originalText = btn.textContent; btn.disabled = true; btn.textContent = 'Importing...'; try { const text = await fetchGoogleDocText(url); (window as any).umami?.track('import-google-doc-success'); els.inputScript.value = text; els.googleDocModal.classList.add('hidden'); loadScript(text, url); } catch (err: any) { (window as any).umami?.track('import-google-doc-error', { error: err.message }); alert(err.message || 'Failed to import document.'); } finally { btn.disabled = false; btn.textContent = originalText; } });
-els.refreshGoogleDocBtn.addEventListener('click', async () => { const url = state.googleDocUrl; if (!url) return; (window as any).umami?.track('refresh-google-doc-click'); const btn = els.refreshGoogleDocBtn as HTMLButtonElement; const originalText = btn.innerHTML; btn.disabled = true; btn.textContent = 'Syncing...'; try { const text = await fetchGoogleDocText(url); (window as any).umami?.track('refresh-google-doc-success'); els.inputScript.value = text; const prevIndex = state.currentIndex; loadScript(text, url); if (prevIndex < state.scriptWords.length) { state.currentIndex = prevIndex; updateHighlight(); scrollToCurrent(); } btn.textContent = 'Synced!'; setTimeout(() => { btn.disabled = false; btn.innerHTML = originalText; }, 1500); } catch (err: any) { (window as any).umami?.track('refresh-google-doc-error', { error: err.message }); alert(err.message || 'Failed to refresh document.'); btn.disabled = false; btn.innerHTML = originalText; } });
+els.confirmGoogleDocImportBtn.addEventListener('click', async () => { const url = els.googleDocUrlInput.value.trim(); if (!url) { alert('Please enter a Google Doc URL.'); return; } const btn = els.confirmGoogleDocImportBtn as HTMLButtonElement; const originalText = btn.textContent; btn.disabled = true; btn.textContent = 'Importing...'; try { const text = await fetchGoogleDocText(url); if (state.config.textFormattingEnabled) await fetchGoogleDocSourceHtml(url, true); (window as any).umami?.track('import-google-doc-success'); els.inputScript.value = text; els.googleDocModal.classList.add('hidden'); loadScript(text, url); } catch (err: any) { (window as any).umami?.track('import-google-doc-error', { error: err.message }); alert(err.message || 'Failed to import document.'); } finally { btn.disabled = false; btn.textContent = originalText; } });
+els.refreshGoogleDocBtn.addEventListener('click', async () => { const url = state.googleDocUrl; if (!url) return; (window as any).umami?.track('refresh-google-doc-click'); const btn = els.refreshGoogleDocBtn as HTMLButtonElement; const originalText = btn.innerHTML; btn.disabled = true; btn.textContent = 'Syncing...'; try { const text = await fetchGoogleDocText(url); if (state.config.textFormattingEnabled) await fetchGoogleDocSourceHtml(url, true); (window as any).umami?.track('refresh-google-doc-success'); els.inputScript.value = text; const prevIndex = state.currentIndex; loadScript(text, url); if (prevIndex < state.scriptWords.length) { state.currentIndex = prevIndex; updateHighlight(); scrollToCurrent(); } btn.textContent = 'Synced!'; setTimeout(() => { btn.disabled = false; btn.innerHTML = originalText; }, 1500); } catch (err: any) { (window as any).umami?.track('refresh-google-doc-error', { error: err.message }); alert(err.message || 'Failed to refresh document.'); btn.disabled = false; btn.innerHTML = originalText; } });
 els.copyGoogleDocUrlBtn.addEventListener('click', async () => { const url = state.googleDocUrl; if (!url) return; (window as any).umami?.track('copy-google-doc-url-click'); try { await navigator.clipboard.writeText(url); const originalHTML = els.copyGoogleDocUrlBtn.innerHTML; els.copyGoogleDocUrlBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>`; alert('Google Doc link copied to clipboard!'); els.copyGoogleDocUrlBtn.innerHTML = originalHTML; } catch (err) { console.error('Failed to copy Google Doc link:', err); alert('Failed to copy link. Please manually copy it from the browser address bar.'); } });
 
 let isAutoScrollStarting = false;
@@ -407,6 +408,19 @@ function updateScrollingUI() { els.scrollingModeSelect.value = state.config.scro
 els.scrollingModeSelect.addEventListener('change', (e) => { state.config.scrollingMode = (e.target as HTMLSelectElement).value as ScrollingMode; autoScrollManager.stop(); isAutoScrollStarting = false; updateScrollingUI(); if (state.isListening) { stopListening(); autoScrollManager.stop(); state.isListening = false; import('./render').then(({ updateMicUI }) => updateMicUI(false)); } });
 els.scrollSpeedInput.addEventListener('input', (e) => { state.config.scrollSpeed = parseFloat((e.target as HTMLInputElement).value); els.scrollSpeedVal.textContent = `${state.config.scrollSpeed.toFixed(1)} w/s`; });
 els.soundSensitivityInput.addEventListener('input', (e) => { state.config.soundSensitivity = parseFloat((e.target as HTMLInputElement).value); els.soundSensitivityVal.textContent = `${Math.round(state.config.soundSensitivity * 100)}%`; });
+window.addEventListener('vp-text-formatting-changed', async () => {
+    if (!els.inputScript.value.trim()) return;
+    if (state.config.textFormattingEnabled && state.googleDocUrl) await fetchGoogleDocSourceHtml(state.googleDocUrl);
+    const sourceUrl = state.googleDocUrl;
+    const previousIndex = state.currentIndex;
+    loadScript(els.inputScript.value, sourceUrl);
+    if (previousIndex < state.scriptWords.length) {
+        state.currentIndex = previousIndex;
+        updateHighlight();
+        scrollToCurrent();
+    }
+});
+
 function boot(): void { updateScrollingUI(); initializeUI(); pinDockToVisualViewport(); setTimeout(() => renderHistoryList(getHistory(), loadScript), 500); }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();
 window.addEventListener('pageshow', () => { renderHistoryList(getHistory(), loadScript); pinDockToVisualViewport(); });
