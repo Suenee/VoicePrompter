@@ -83,7 +83,10 @@
     { "id": "rotate_screen", "name": "Rotate Screen state (on/off)", "initial": "" },
     { "id": "recording_dock_opacity", "name": "Recording Dock opacity (%)", "initial": "" },
     { "id": "google_doc_url", "name": "Current Google Docs URL", "initial": "" },
-    { "id": "text_formatting", "name": "Text Formatting state (on/off)", "initial": "" },\n    { "id": "format_paragraphs", "name": "Text Formatting: Paragraphs state (on/off)", "initial": "" },\n    { "id": "format_colors", "name": "Text Formatting: Colors state (on/off)", "initial": "" },\n    { "id": "format_style", "name": "Text Formatting: Style state (on/off)", "initial": "" }
+    { "id": "text_formatting", "name": "Text Formatting state (on/off)", "initial": "" },
+    { "id": "format_paragraphs", "name": "Text Formatting: Paragraphs state (on/off)", "initial": "" },
+    { "id": "format_colors", "name": "Text Formatting: Colors state (on/off)", "initial": "" },
+    { "id": "format_style", "name": "Text Formatting: Style state (on/off)", "initial": "" }
   ],
   "dynamicVariables": [
     {
@@ -105,7 +108,10 @@
       "rotateScreen": { "variableId": "rotate_screen", "type": "enum", "values": ["on", "off"] },
       "recordingDockOpacity": { "variableId": "recording_dock_opacity", "type": "integer", "min": 30, "max": 100 },
       "googleDocUrl": { "variableId": "google_doc_url", "type": "string" },
-      "textFormatting": { "variableId": "text_formatting", "type": "enum", "values": ["on", "off"] },\n      "formatParagraphs": { "variableId": "format_paragraphs", "type": "enum", "values": ["on", "off"] },\n      "formatColors": { "variableId": "format_colors", "type": "enum", "values": ["on", "off"] },\n      "formatStyle": { "variableId": "format_style", "type": "enum", "values": ["on", "off"] }
+      "textFormatting": { "variableId": "text_formatting", "type": "enum", "values": ["on", "off"] },
+      "formatParagraphs": { "variableId": "format_paragraphs", "type": "enum", "values": ["on", "off"] },
+      "formatColors": { "variableId": "format_colors", "type": "enum", "values": ["on", "off"] },
+      "formatStyle": { "variableId": "format_style", "type": "enum", "values": ["on", "off"] }
     }
   },
   "memory": {
