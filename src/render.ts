@@ -2,6 +2,7 @@ import { els } from './elements';
 import { state } from './state';
 import { HistoryItem } from './types';
 import { remoteEventHooks } from './remote-event-hooks';
+import { renderFormattedSource } from './text-formatting';
 
 interface MarkerRange {
     start: number;
@@ -16,20 +17,40 @@ export function renderScript(): void {
     els.scriptContent.innerHTML = '';
     markerRanges = [];
     lastSyncedMarkerStart = null;
+
+    const formattedWords = renderFormattedSource(els.scriptContent);
+    if (formattedWords) state.scriptWords = formattedWords;
+    else {
+        state.scriptWords.forEach((obj, index) => {
+            const span = document.createElement('span');
+            span.textContent = obj.word;
+            span.id = `word-${index}`;
+            els.scriptContent.appendChild(span);
+            obj.element = span;
+        });
+    }
+
     state.scriptWords.forEach((obj, index) => {
-        const span = document.createElement('span');
-        span.textContent = obj.word;
+        const span = obj.element;
+        if (!span) return;
         span.id = `word-${index}`;
-        let classList = "script-word transition-opacity duration-300 ";
-        if (obj.isStop) classList += "stop-marker ";
-        else if (obj.isBreak) { classList += "line-break "; span.style.display = 'block'; span.style.width = '100%'; }
-        else if (obj.skip) classList += "skipped-word ";
-        else classList += "text-future ";
-        span.className = classList;
-        span.onclick = () => { if (!obj.skip) { state.currentIndex = index; updateHighlight(); scrollToCurrent(); } };
-        els.scriptContent.appendChild(span);
-        obj.element = span;
+        span.classList.add('script-word', 'transition-opacity', 'duration-300');
+        if (obj.isStop) span.classList.add('stop-marker');
+        else if (obj.isBreak) {
+            span.classList.add('line-break');
+            span.style.display = 'block';
+            span.style.width = '100%';
+        } else if (obj.skip) span.classList.add('skipped-word');
+        else span.classList.add('text-future');
+        span.onclick = () => {
+            if (!obj.skip) {
+                state.currentIndex = index;
+                updateHighlight();
+                scrollToCurrent();
+            }
+        };
     });
+
     wrapCueMarkers();
     if (state.config.showStopIcon) els.scriptContent.classList.add('show-stops');
     else els.scriptContent.classList.remove('show-stops');
