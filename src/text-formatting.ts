@@ -1,43 +1,63 @@
 import { state } from './state';
 import { extractDocId } from './gdoc';
+import { ScriptWord } from './types';
 
 let pastedHtml: string | null = null;
 let googleDocHtml: string | null = null;
 let googleDocHtmlUrl: string | null = null;
-let applying = false;
 
-function classColorMap(doc: Document): Map<string, string> {
-    const colors = new Map<string, string>();
+const ALLOWED_TAGS = new Set(['span', 'b', 'strong', 'i', 'em', 'u']);
+const ALLOWED_STYLES = new Set(['color']);
+const BLOCK_TAGS = /^(p|div|li|h[1-6]|tr)$/i;
+
+function classStyleMap(doc: Document): Map<string, Map<string, string>> {
+    const styles = new Map<string, Map<string, string>>();
     for (const style of Array.from(doc.querySelectorAll('style'))) {
         const css = style.textContent || '';
-        const rule = /\.([\w-]+)\s*\{([^}]*)\}/g;
+        const rule = /([^{}]+)\{([^}]*)\}/g;
         let match: RegExpExecArray | null;
         while ((match = rule.exec(css))) {
-            const color = match[2].match(/(?:^|;)\s*color\s*:\s*([^;!]+)(?:\s*!important)?/i)?.[1]?.trim();
-            if (color) colors.set(match[1], color);
+            const declarations = new Map<string, string>();
+            for (const declaration of match[2].split(';')) {
+                const colon = declaration.indexOf(':');
+                if (colon < 0) continue;
+                const property = declaration.slice(0, colon).trim().toLowerCase();
+                if (!ALLOWED_STYLES.has(property)) continue;
+                const value = declaration.slice(colon + 1).replace(/!important\s*$/i, '').trim();
+                if (value) declarations.set(property, value);
+            }
+            if (!declarations.size) continue;
+            for (const selector of match[1].split(',')) {
+                const classMatch = selector.trim().match(/^\.([\w-]+)$/);
+                if (classMatch) styles.set(classMatch[1], new Map(declarations));
+            }
         }
     }
-    return colors;
+    return styles;
 }
 
-function inheritedColor(element: Element | null, colors: Map<string, string>): string | null {
-    let current = element;
-    while (current) {
-        const inline = (current as HTMLElement).style?.color;
-        if (inline) return inline;
-        for (const className of Array.from(current.classList)) {
-            const color = colors.get(className);
-            if (color) return color;
-        }
-        current = current.parentElement;
+function allowedStyle(element: Element, classStyles: Map<string, Map<string, string>>): Map<string, string> {
+    const result = new Map<string, string>();
+    for (const className of Array.from(element.classList)) {
+        const declarations = classStyles.get(className);
+        declarations?.forEach((value, property) => result.set(property, value));
     }
-    return null;
+    const inline = (element as HTMLElement).style;
+    for (const property of ALLOWED_STYLES) {
+        const value = inline.getPropertyValue(property).trim();
+        if (value) result.set(property, value);
+    }
+    return result;
 }
 
-/** PHP strip_tags()-style allowlist. Currently only foreground colour survives. */
+function isMarkerText(text: string): boolean {
+    return /^\s*\[[^\]]*\]\s*$/.test(text);
+}
+
+/** Sanitizes source HTML structurally. Formatting survives as HTML/CSS, never as word metadata. */
 export function sanitizeSourceHtml(html: string): string {
     const source = new DOMParser().parseFromString(html, 'text/html');
-    const colors = classColorMap(source);
+    const classStyles = classStyleMap(source);
     const output = document.implementation.createHTMLDocument('');
     const root = output.createElement('div');
 
@@ -45,29 +65,42 @@ export function sanitizeSourceHtml(html: string): string {
         if (node.nodeType === Node.TEXT_NODE) {
             const text = node.textContent || '';
             if (!text) return;
-            const parts = text.split(/(\[[^\]]*\])/g);
-            for (const part of parts) {
+            // Markers are deliberately split out of source formatting.
+            for (const part of text.split(/(\[[^\]]*\])/g)) {
                 if (!part) continue;
-                const marker = /^\[[^\]]*\]$/.test(part);
-                const color = marker ? null : inheritedColor(node.parentElement, colors);
-                if (color) {
-                    const span = output.createElement('span');
-                    span.style.color = color;
-                    span.textContent = part;
-                    parent.appendChild(span);
-                } else parent.appendChild(output.createTextNode(part));
+                if (/^\[[^\]]*\]$/.test(part)) {
+                    const marker = output.createElement('span');
+                    marker.setAttribute('data-vp-marker', '');
+                    marker.textContent = part;
+                    root.appendChild(marker);
+                } else {
+                    parent.appendChild(output.createTextNode(part));
+                }
             }
             return;
         }
         if (!(node instanceof Element)) return;
+
         const tag = node.tagName.toLowerCase();
-        if (tag === 'br') { parent.appendChild(output.createElement('br')); return; }
-        for (const child of Array.from(node.childNodes)) append(child, parent);
-        if (/^(p|div|li|h[1-6]|tr)$/.test(tag)) parent.appendChild(output.createElement('br'));
+        if (tag === 'br') {
+            parent.appendChild(output.createElement('br'));
+            return;
+        }
+
+        const target = ALLOWED_TAGS.has(tag) ? output.createElement(tag) : parent;
+        if (target !== parent) {
+            const styles = allowedStyle(node, classStyles);
+            styles.forEach((value, property) => target.style.setProperty(property, value));
+            parent.appendChild(target);
+        }
+
+        for (const child of Array.from(node.childNodes)) append(child, target);
+        if (BLOCK_TAGS.test(tag)) root.appendChild(output.createElement('br'));
     };
 
     for (const child of Array.from(source.body.childNodes)) append(child, root);
-    return root.innerHTML.replace(/(?:<br>\s*)+$/i, '');
+    while (root.lastElementChild?.tagName === 'BR') root.lastElementChild.remove();
+    return root.innerHTML;
 }
 
 async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
@@ -95,9 +128,10 @@ async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
     return null;
 }
 
-async function fetchGoogleDocSourceHtml(url: string): Promise<string | null> {
+export async function fetchGoogleDocSourceHtml(url: string): Promise<string | null> {
     const docId = extractDocId(url);
     if (!docId) return null;
+    if (googleDocHtml && googleDocHtmlUrl === url) return googleDocHtml;
     const local = window.location.port === '5173' || window.location.port === '4173';
     const proxy = local ? `/gdoc-proxy?id=${encodeURIComponent(docId)}&format=html` : `https://gdoc-proxy.kosuvorov.workers.dev/?id=${encodeURIComponent(docId)}&format=html`;
     try {
@@ -113,42 +147,79 @@ async function fetchGoogleDocSourceHtml(url: string): Promise<string | null> {
     }
 }
 
-function colorsFromSanitizedHtml(html: string): Array<string | null> {
-    const doc = new DOMParser().parseFromString(`<div id="vp-source">${html}</div>`, 'text/html');
-    const root = doc.getElementById('vp-source');
-    if (!root) return [];
-    const colors: Array<string | null> = [];
-    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node: Node | null;
-    while ((node = walker.nextNode())) {
-        const color = (node.parentElement as HTMLElement | null)?.style?.color || null;
-        for (const _ of (node.textContent || '').matchAll(/\S+/g)) colors.push(color);
-    }
-    return colors;
+function makeWord(word: string, element: HTMLElement, inMarker: boolean): ScriptWord {
+    const clean = word.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
+    return {
+        word,
+        clean,
+        element,
+        skip: inMarker || /[\u{1F300}-\u{1F9FF}]/u.test(word),
+        isStop: false
+    };
 }
 
-async function applyCurrentSourceFormatting(): Promise<void> {
-    if (applying) return;
-    applying = true;
-    try {
-        for (const word of state.scriptWords) word.element?.style.removeProperty('color');
-        if (!state.config.textFormattingEnabled) return;
+/**
+ * Renders directly from sanitized source HTML. Word spans are inserted into the
+ * surviving DOM text nodes, so formatting is inherited from the real source DOM.
+ */
+export function renderFormattedSource(container: HTMLElement): ScriptWord[] | null {
+    if (!state.config.textFormattingEnabled) return null;
+    const sourceHtml = state.googleDocUrl && googleDocHtmlUrl === state.googleDocUrl ? googleDocHtml : pastedHtml;
+    if (!sourceHtml) return null;
 
-        let sourceHtml = state.googleDocUrl ? googleDocHtml : pastedHtml;
-        if (state.googleDocUrl && (!sourceHtml || googleDocHtmlUrl !== state.googleDocUrl)) sourceHtml = await fetchGoogleDocSourceHtml(state.googleDocUrl);
-        if (!sourceHtml) return;
+    const template = document.createElement('template');
+    template.innerHTML = sanitizeSourceHtml(sourceHtml);
+    const words: ScriptWord[] = [];
+    let inMarker = false;
 
-        // The source is filtered once. Rendering then consumes the surviving
-        // formatting in source order; there is no word search/rematching pass.
-        const colors = colorsFromSanitizedHtml(sanitizeSourceHtml(sourceHtml));
-        let sourceIndex = 0;
-        for (const word of state.scriptWords) {
-            if (word.isBreak || word.isStop) continue;
-            const color = colors[sourceIndex++] || null;
-            if (word.skip || word.element?.closest('.slide-marker-row')) continue;
-            if (color && word.element) word.element.style.color = color;
+    const processText = (node: Text): void => {
+        const parent = node.parentElement;
+        if (!parent) return;
+        const markerNode = !!parent.closest('[data-vp-marker]');
+        const fragment = document.createDocumentFragment();
+        const parts = (node.textContent || '').split(/(\s+)/);
+        for (const part of parts) {
+            if (!part) continue;
+            if (/^\s+$/.test(part)) {
+                fragment.appendChild(document.createTextNode(part));
+                continue;
+            }
+            if (part.includes('[')) inMarker = true;
+            const span = document.createElement('span');
+            span.textContent = part;
+            span.className = 'script-word transition-opacity duration-300';
+            fragment.appendChild(span);
+            words.push(makeWord(part, span, markerNode || inMarker));
+            if (part.includes(']')) inMarker = false;
         }
-    } finally { applying = false; }
+        node.replaceWith(fragment);
+    };
+
+    const walk = (parent: ParentNode): void => {
+        for (const child of Array.from(parent.childNodes)) {
+            if (child.nodeType === Node.TEXT_NODE) processText(child as Text);
+            else if (child instanceof HTMLBRElement) {
+                const span = document.createElement('span');
+                const preserve = state.config.preserveFormatting;
+                span.textContent = preserve ? '' : '🛑';
+                span.className = preserve ? 'script-word line-break' : 'script-word stop-marker';
+                span.style.display = preserve ? 'block' : '';
+                if (preserve) { span.style.width = '100%'; span.classList.add('line-break'); }
+                child.replaceWith(span);
+                words.push({ word: preserve ? '' : '🛑', clean: '', element: span, skip: true, isStop: !preserve, isBreak: preserve });
+            } else if (child instanceof Element) walk(child);
+        }
+    };
+    walk(template.content);
+
+    container.replaceChildren(template.content.cloneNode(true));
+    // cloneNode invalidates element references; bind them once from the rendered DOM.
+    const renderedWords = Array.from(container.querySelectorAll<HTMLElement>('.script-word'));
+    words.forEach((word, index) => {
+        word.element = renderedWords[index] || null;
+        if (word.element) word.element.id = `word-${index}`;
+    });
+    return words;
 }
 
 function insertSettingsToggle(): HTMLInputElement | null {
@@ -165,24 +236,25 @@ function insertSettingsToggle(): HTMLInputElement | null {
 }
 
 function installPasteCapture(input: HTMLTextAreaElement): void {
-    input.addEventListener('paste', event => { const html = event.clipboardData?.getData('text/html'); pastedHtml = html || null; }, true);
-    input.addEventListener('input', event => { if ((event as InputEvent).isTrusted && !(event as InputEvent).inputType?.startsWith('insertFromPaste')) pastedHtml = null; });
+    input.addEventListener('paste', event => {
+        pastedHtml = event.clipboardData?.getData('text/html') || null;
+    }, true);
+    input.addEventListener('input', event => {
+        if ((event as InputEvent).isTrusted && !(event as InputEvent).inputType?.startsWith('insertFromPaste')) pastedHtml = null;
+    });
 }
 
 function install(): void {
     const toggle = insertSettingsToggle();
     if (toggle) {
         toggle.checked = state.config.textFormattingEnabled;
-        toggle.addEventListener('change', () => { state.config.textFormattingEnabled = toggle.checked; void applyCurrentSourceFormatting(); });
+        toggle.addEventListener('change', () => {
+            state.config.textFormattingEnabled = toggle.checked;
+            window.dispatchEvent(new CustomEvent('vp-text-formatting-changed'));
+        });
     }
     const input = document.getElementById('inputScript') as HTMLTextAreaElement | null;
     if (input) installPasteCapture(input);
-    const script = document.getElementById('scriptContent');
-    if (script) {
-        const observer = new MutationObserver(() => { if (!applying) void applyCurrentSourceFormatting(); });
-        observer.observe(script, { childList: true, subtree: true });
-    }
-    window.addEventListener('vp-text-formatting-refresh', () => { void applyCurrentSourceFormatting(); });
 }
 
 if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install, { once: true }); else install();
