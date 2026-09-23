@@ -14,7 +14,10 @@ type SynchronizedSettingName =
     | 'rotateScreen'
     | 'recordingDockOpacity'
     | 'googleDocUrl'
-    | 'textFormatting';
+    | 'textFormatting'
+    | 'formatParagraphs'
+    | 'formatColors'
+    | 'formatStyle';
 
 function emitSynchronizedSettingChanged(setting: SynchronizedSettingName, value: string | number): void {
     window.dispatchEvent(new CustomEvent(SYNCHRONIZED_SETTING_CHANGED_EVENT, {
@@ -32,6 +35,15 @@ function emitConfigSettingChange(property: string, value: unknown): void {
             break;
         case 'textFormattingEnabled':
             emitSynchronizedSettingChanged('textFormatting', value ? 'on' : 'off');
+            break;
+        case 'preserveFormatting':
+            emitSynchronizedSettingChanged('formatParagraphs', value ? 'on' : 'off');
+            break;
+        case 'sourceColorsEnabled':
+            emitSynchronizedSettingChanged('formatColors', value ? 'on' : 'off');
+            break;
+        case 'sourceStylesEnabled':
+            emitSynchronizedSettingChanged('formatStyle', value ? 'on' : 'off');
             break;
         case 'fontSize':
             emitSynchronizedSettingChanged('fontSize', value as number);
