@@ -185,7 +185,9 @@ export function renderFormattedSource(container: HTMLElement): ScriptWord[] | nu
         for (const part of parts) {
             if (!part) continue;
             if (/^\s+$/.test(part)) {
-                fragment.appendChild(document.createTextNode(part));
+                // HTML collapses whitespace visually, but source exports may contain runs
+                // around formatting spans. Normalize them so VP never creates double spaces.
+                fragment.appendChild(document.createTextNode(' '));
                 continue;
             }
             if (part.includes('[')) inMarker = true;
@@ -215,6 +217,31 @@ export function renderFormattedSource(container: HTMLElement): ScriptWord[] | nu
         }
     };
     walk(template.content);
+
+    // Formatting boundaries can leave adjacent whitespace text nodes (for example
+    // "word " + <span> + " next"). Collapse every inline run to one visible space.
+    const normalizeWhitespace = (parent: ParentNode): void => {
+        let previousEndedWithSpace = false;
+        for (const child of Array.from(parent.childNodes)) {
+            if (child instanceof HTMLBRElement || (child instanceof HTMLElement && child.classList.contains('line-break'))) {
+                previousEndedWithSpace = false;
+                continue;
+            }
+            if (child.nodeType === Node.TEXT_NODE) {
+                let value = (child.textContent || '').replace(/\s+/g, ' ');
+                if (previousEndedWithSpace) value = value.replace(/^ /, '');
+                child.textContent = value;
+                previousEndedWithSpace = value.endsWith(' ');
+                continue;
+            }
+            if (child instanceof Element) {
+                normalizeWhitespace(child);
+                const text = child.textContent || '';
+                if (text) previousEndedWithSpace = /\s$/.test(text);
+            }
+        }
+    };
+    normalizeWhitespace(template.content);
 
     container.replaceChildren(template.content.cloneNode(true));
     // cloneNode invalidates element references; bind them once from the rendered DOM.
