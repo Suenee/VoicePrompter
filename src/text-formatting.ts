@@ -50,10 +50,6 @@ function allowedStyle(element: Element, classStyles: Map<string, Map<string, str
     return result;
 }
 
-function isMarkerText(text: string): boolean {
-    return /^\s*\[[^\]]*\]\s*$/.test(text);
-}
-
 /** Sanitizes source HTML structurally. Formatting survives as HTML/CSS, never as word metadata. */
 export function sanitizeSourceHtml(html: string): string {
     const source = new DOMParser().parseFromString(html, 'text/html');
