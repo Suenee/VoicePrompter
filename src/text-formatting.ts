@@ -128,10 +128,10 @@ async function unzipFirstHtml(buffer: ArrayBuffer): Promise<string | null> {
     return null;
 }
 
-export async function fetchGoogleDocSourceHtml(url: string): Promise<string | null> {
+export async function fetchGoogleDocSourceHtml(url: string, force = false): Promise<string | null> {
     const docId = extractDocId(url);
     if (!docId) return null;
-    if (googleDocHtml && googleDocHtmlUrl === url) return googleDocHtml;
+    if (!force && googleDocHtml && googleDocHtmlUrl === url) return googleDocHtml;
     const local = window.location.port === '5173' || window.location.port === '4173';
     const proxy = local ? `/gdoc-proxy?id=${encodeURIComponent(docId)}&format=html` : `https://gdoc-proxy.kosuvorov.workers.dev/?id=${encodeURIComponent(docId)}&format=html`;
     try {
