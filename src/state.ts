@@ -1,6 +1,6 @@
 import { AppConfig, AppState } from './types';
 import { DEFAULT_APP_CONFIG, DEFAULT_USER_SETTINGS } from './default-settings';
-import { loadSetting, resetSettings, saveSetting } from './storage';
+import { loadSetting, loadSettings, resetSettings, saveSetting } from './storage';
 
 export const SYNCHRONIZED_SETTING_CHANGED_EVENT = 'vp-synchronized-setting-changed';
 
@@ -62,9 +62,13 @@ function emitStateSettingChange(property: string, value: unknown): void {
     }
 }
 
+const storedConfig = loadSettings({} as Record<string, unknown>);
 const restoredConfig = Object.fromEntries(
     Object.entries(DEFAULT_APP_CONFIG).map(([key, defaultValue]) => [key, loadSetting(key, defaultValue)])
 ) as unknown as AppConfig;
+// One-time compatibility migration: the former Text Formatting switch meant source colors.
+if (storedConfig.sourceColorsEnabled === undefined && restoredConfig.textFormattingEnabled) restoredConfig.sourceColorsEnabled = true;
+restoredConfig.textFormattingEnabled = restoredConfig.sourceColorsEnabled || restoredConfig.sourceStylesEnabled;
 
 const persistentConfig = new Proxy(restoredConfig, {
     set(target, property, value) {
