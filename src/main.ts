@@ -320,6 +320,8 @@ els.restartScriptBtn.addEventListener('click', restartScript);
 
 const visitorPlatform = detectVisitorPlatform();
 const nativePromo = getNativePromo(visitorPlatform);
+const nativePromoSection = els.settingsNativeAppBanner.parentElement;
+if (import.meta.env.DEV) nativePromoSection?.classList.add('hidden');
 els.nativePromoTitle.textContent = nativePromo.title;
 let promoTimeout: number | null = null;
 let currentPromoPairIndex = 0;
@@ -337,7 +339,7 @@ function startPromoAnimation() {
     animateNextWord();
 }
 function stopPromoAnimation() { if (promoTimeout) { window.clearTimeout(promoTimeout); promoTimeout = null; } }
-els.toggleSettingsBtn.addEventListener('click', () => { (window as any).umami?.track('settings-toggle'); const isHidden = els.settingsPanel.classList.toggle('hidden'); if (!isHidden) { startPromoAnimation(); if (!isIOS) enumerateAndPopulateDevices(false); } else stopPromoAnimation(); });
+els.toggleSettingsBtn.addEventListener('click', () => { (window as any).umami?.track('settings-toggle'); const isHidden = els.settingsPanel.classList.toggle('hidden'); if (!isHidden) { if (!import.meta.env.DEV) startPromoAnimation(); if (!isIOS) enumerateAndPopulateDevices(false); } else stopPromoAnimation(); });
 els.closeSettingsBtn.addEventListener('click', () => { els.settingsPanel.classList.add('hidden'); stopPromoAnimation(); });
 els.settingsNativeAppBanner.addEventListener('click', () => { const promoData = currentPromoWord ? `${currentPromoPairStatic} - ${currentPromoWord}` : currentPromoPairStatic; (window as any).umami?.track(nativePromo.analyticsEvent, { destination: nativePromo.href, sourcePlatform: visitorPlatform, variant: promoData }); window.location.href = nativePromo.href; });
 
