@@ -51,6 +51,8 @@ html {
     padding: 0.16em 0.35em;
     margin: 0.2em 0 0.35em;
     border-radius: 0.08em;
+    /* VP markers never inherit source-document text formatting. */
+    color: var(--base-color, #ffffff) !important;
 }
 
 .slide-marker-row .script-word {
