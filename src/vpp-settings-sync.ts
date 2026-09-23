@@ -162,11 +162,8 @@ function setFormattingPart(part: 'paragraphs' | 'colors' | 'style', requested: T
 }
 
 function setTextFormatting(requested: ToggleState): void {
-    const desired = targetBoolean(state.config.textFormattingEnabled, requested);
-    const toggle = document.getElementById('textFormattingToggle') as HTMLInputElement | null;
-    state.config.textFormattingEnabled = desired;
-    if (toggle) toggle.checked = desired;
-    window.dispatchEvent(new Event('vp-text-formatting-refresh'));
+    // Backward-compatible alias: the former Text Formatting switch controlled source colors.
+    setFormattingPart('colors', requested);
 }
 
 function wrapSimpleSettingMethod(
