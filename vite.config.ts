@@ -35,6 +35,21 @@ function disableTrackingInDevelopment() {
 // Development-only same-origin proxy. This deliberately avoids the public
 // Cloudflare Worker's Origin allowlist, which cannot safely enumerate arbitrary
 // private-LAN addresses such as http://192.168.x.x:5173.
+function developmentHealthEndpoint() {
+    return {
+        name: 'development-health-endpoint',
+        apply: 'serve' as const,
+        configureServer(server: { middlewares: { use: (route: string, handler: (req: { url?: string }, res: import('http').ServerResponse) => void) => void } }) {
+            server.middlewares.use('/vp-health', (_req, res) => {
+                res.statusCode = 200
+                res.setHeader('Content-Type', 'application/json; charset=utf-8')
+                res.setHeader('Cache-Control', 'no-store')
+                res.end(JSON.stringify({ ok: true, service: 'VoicePrompter' }))
+            })
+        }
+    }
+}
+
 function googleDocDevelopmentProxy() {
     return {
         name: 'google-doc-development-proxy',
@@ -91,6 +106,7 @@ export default defineConfig({
     appType: 'mpa',
     plugins: [
         disableTrackingInDevelopment(),
+        developmentHealthEndpoint(),
         googleDocDevelopmentProxy(),
         VitePWA({
             registerType: 'autoUpdate',
