@@ -471,8 +471,11 @@ function connect(): void {
     setRemoteStatus('error');
 
     const { ip, port, apiKey } = getConnectionSettings();
-    const auth = apiKey ? `?apiKey=${encodeURIComponent(apiKey)}` : '';
-    const url = `ws://${ip}:${port}/vp${auth}`;
+    if (!apiKey.trim()) {
+        console.warn('[RemoteControl] API key is required.');
+        return;
+    }
+    const url = `ws://${ip}:${port}/vp?apiKey=${encodeURIComponent(apiKey)}`;
 
     try {
         socket = new WebSocket(url);
@@ -873,12 +876,8 @@ function createModal(): HTMLElement {
                         type="password"
                         autocomplete="off"
                         class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-base text-white focus:ring-2 focus:ring-[#FFBB00] focus:border-transparent outline-none transition-all"
-                        placeholder="Optional"
+                        placeholder="Enter API key"
                     >
-
-                    <p class="text-[10px] text-neutral-500 mt-1.5">
-                        Leave empty if authentication is disabled.
-                    </p>
                 </div>
 
                 <div class="pt-1">
@@ -1272,6 +1271,13 @@ window.addEventListener('DOMContentLoaded', () => {
                 'Port must be a number from 1 to 65535.';
             validationError.classList.remove('hidden');
             portInput.focus();
+            return;
+        }
+
+        if (!apiKey) {
+            validationError.textContent = 'API Key is required.';
+            validationError.classList.remove('hidden');
+            apiKeyInput.focus();
             return;
         }
 
