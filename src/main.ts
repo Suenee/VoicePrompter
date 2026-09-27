@@ -423,7 +423,56 @@ window.addEventListener('vp-text-formatting-changed', async () => {
     }
 });
 
-function boot(): void { updateScrollingUI(); initializeUI(); pinDockToVisualViewport(); setTimeout(() => renderHistoryList(getHistory(), loadScript), 500); }
+function installWebServerGuard(): void {
+    if (!import.meta.env.DEV) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'webServerUnavailableModal';
+    modal.className = 'hidden fixed inset-0 z-[11000] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4';
+    modal.innerHTML = `
+        <div class="bg-neutral-900 border border-neutral-700 rounded-xl p-6 max-w-md w-full shadow-2xl shadow-black/50">
+            <h2 class="text-xl font-bold text-white mb-2">Web server is not running</h2>
+            <p class="text-sm text-neutral-300">Start the VoicePrompter web server and try again. Some functions, including Remote Control, may not work correctly without it.</p>
+            <div class="flex justify-end gap-3 mt-6">
+                <button id="webServerRetryBtn" type="button" class="px-4 py-2.5 bg-[#FFBB00] hover:bg-[#D9A000] rounded-lg text-sm font-semibold text-black transition-colors">Retry</button>
+                <button id="webServerOfflineBtn" type="button" class="px-4 py-2.5 bg-neutral-800 hover:bg-neutral-700 rounded-lg text-sm font-medium text-white border border-neutral-700 transition-colors">Run Offline</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+
+    let offlineAccepted = false;
+    const show = () => { if (!offlineAccepted) modal.classList.remove('hidden'); };
+    const hide = () => modal.classList.add('hidden');
+
+    const check = async (): Promise<boolean> => {
+        try {
+            const controller = new AbortController();
+            const timeout = window.setTimeout(() => controller.abort(), 2500);
+            const response = await fetch('/vp-health', { cache: 'no-store', signal: controller.signal });
+            window.clearTimeout(timeout);
+            if (!response.ok) return false;
+            const data = await response.json().catch(() => null) as { ok?: boolean; service?: string } | null;
+            return data?.ok === true && data?.service === 'VoicePrompter';
+        } catch {
+            return false;
+        }
+    };
+
+    const verify = async () => {
+        if (await check()) hide();
+        else show();
+    };
+
+    document.getElementById('webServerRetryBtn')?.addEventListener('click', verify);
+    document.getElementById('webServerOfflineBtn')?.addEventListener('click', () => {
+        offlineAccepted = true;
+        hide();
+    });
+
+    void verify();
+}
+
+function boot(): void { updateScrollingUI(); initializeUI(); installWebServerGuard(); pinDockToVisualViewport(); setTimeout(() => renderHistoryList(getHistory(), loadScript), 500); }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true }); else boot();
 window.addEventListener('pageshow', () => { renderHistoryList(getHistory(), loadScript); pinDockToVisualViewport(); });
 var dockPinned = false;
